@@ -293,6 +293,12 @@ export async function setBusinessStatusAdmin(
   if (error) return { error: error.message }
   revalidatePath('/admin/listings')
   revalidatePath('/marketplace')
+  // Also bust the owner's dashboard caches — without these, after admin
+  // pauses + republishes a listing the owner's dashboard keeps serving
+  // the prior cached state and the business appears to have vanished.
+  revalidatePath('/dashboard')
+  revalidatePath('/dashboard/services')
+  revalidatePath('/dashboard/business/edit')
   return { error: null }
 }
 

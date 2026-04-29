@@ -312,7 +312,10 @@ export async function updateBusinessStatus(
     .eq('owner_id', user.id)
 
   if (error) return { error: error.message }
+  revalidatePath('/dashboard')
   revalidatePath('/dashboard/services')
+  revalidatePath('/dashboard/business/edit')
   revalidatePath('/marketplace')
+  revalidatePath(`/marketplace/${id}`)
   return { error: null }
 }
