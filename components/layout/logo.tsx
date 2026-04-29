@@ -42,12 +42,17 @@ export function Logo({ variant = 'lockup', colorMode = 'auto', className, height
   }
 
   // Lockup: full SVG (mark + wordmark).
+  // NOTE: do NOT set display via inline style here — the parent often passes
+  // `hidden sm:block` (or similar responsive utilities) via className to hide
+  // the lockup at mobile breakpoints in favor of the mark variant. Inline
+  // styles win over Tailwind's `hidden`, which used to cause both lockup AND
+  // mark to render simultaneously at mobile.
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={isDark ? '/images/member-market-logo-white.svg' : '/images/member-market-logo.svg'}
       alt="Member Market"
-      style={{ height, width: 'auto', display: 'block' }}
+      style={{ height, width: 'auto' }}
       className={cn('flex-shrink-0 select-none', className)}
       draggable={false}
     />
