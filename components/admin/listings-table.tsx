@@ -6,6 +6,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { setBusinessStatusAdmin } from '@/actions/admin'
+import { TransferListingButton } from '@/components/admin/transfer-listing-button'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 
@@ -40,7 +41,7 @@ const STATUS_COLORS: Record<Status, string> = {
   paused: 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20',
 }
 
-export function ListingsTable({ listings }: { listings: AdminListing[] }) {
+export function ListingsTable({ listings, isSuperAdmin = false }: { listings: AdminListing[]; isSuperAdmin?: boolean }) {
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
       <div className="overflow-x-auto">
@@ -56,7 +57,7 @@ export function ListingsTable({ listings }: { listings: AdminListing[] }) {
             </tr>
           </thead>
           <tbody>
-            {listings.map(l => <ListingRow key={l.id} listing={l} />)}
+            {listings.map(l => <ListingRow key={l.id} listing={l} isSuperAdmin={isSuperAdmin} />)}
             {listings.length === 0 && (
               <tr><td colSpan={6} className="text-center py-10 text-muted-foreground text-sm">No listings.</td></tr>
             )}
@@ -67,7 +68,7 @@ export function ListingsTable({ listings }: { listings: AdminListing[] }) {
   )
 }
 
-function ListingRow({ listing }: { listing: AdminListing }) {
+function ListingRow({ listing, isSuperAdmin }: { listing: AdminListing; isSuperAdmin: boolean }) {
   const [isPending, startTransition] = useTransition()
   const setStatus = (status: Status) =>
     startTransition(() => { setBusinessStatusAdmin(listing.id, status) })
@@ -138,6 +139,13 @@ function ListingRow({ listing }: { listing: AdminListing }) {
               className="text-destructive hover:text-destructive">
               Pause
             </Button>
+          )}
+          {isSuperAdmin && (
+            <TransferListingButton
+              businessId={listing.id}
+              businessName={listing.name}
+              currentOwnerName={owner?.full_name ?? null}
+            />
           )}
         </div>
       </td>

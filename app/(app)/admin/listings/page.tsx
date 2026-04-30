@@ -5,6 +5,15 @@ export default async function AdminListingsPage() {
   const supabase = await createClient()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any
+  const { data: { user } } = await supabase.auth.getUser()
+
+  // Fetch the viewer's role so we can gate super-admin-only actions
+  // (e.g. Transfer ownership) at the row level.
+  const { data: me } = await db
+    .from('profiles')
+    .select('role')
+    .eq('id', user!.id)
+    .maybeSingle() as { data: { role: 'member' | 'chapter_admin' | 'super_admin' } | null }
 
   const { data: businesses } = await db
     .from('businesses')
@@ -22,7 +31,7 @@ export default async function AdminListingsPage() {
         <h1 className="text-2xl font-bold">Listings</h1>
         <p className="text-sm text-muted-foreground mt-1">All business listings on the platform — see owner, edit, manage services.</p>
       </div>
-      <ListingsTable listings={businesses ?? []} />
+      <ListingsTable listings={businesses ?? []} isSuperAdmin={me?.role === 'super_admin'} />
     </div>
   )
 }

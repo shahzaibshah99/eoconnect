@@ -302,6 +302,105 @@ export async function setBusinessStatusAdmin(
   return { error: null }
 }
 
+// ── Transfer listing ownership (super_admin only) ───────────
+
+export interface MemberSearchResult {
+  id: string
+  full_name: string | null
+  eo_membership_email: string | null
+  avatar_url: string | null
+  eo_chapter: string | null
+  chapter_country: string | null
+  chapter_city: string | null
+}
+
+/**
+ * Typeahead search for the transfer-ownership picker. Matches on name
+ * and membership email. Caps results at 20.
+ *
+ * super_admin only — chapter admins shouldn't be moving listings around.
+ */
+export async function searchMembersForTransfer(query: string): Promise<{
+  error: string | null
+  results: MemberSearchResult[]
+}> {
+  const ctx = await requireAdmin()
+  if (ctx.error) return { error: ctx.error, results: [] }
+  if (ctx.role !== 'super_admin') return { error: 'Super admin only', results: [] }
+
+  const q = query.trim()
+  if (q.length < 2) return { error: null, results: [] }
+
+  const safe = q.replace(/[%_\\]/g, m => '\\' + m)
+  const { data, error } = await ctx.db
+    .from('profiles')
+    .select('id, full_name, eo_membership_email, avatar_url, eo_chapter, chapter_country, chapter_city')
+    .or(`full_name.ilike.%${safe}%,eo_membership_email.ilike.%${safe}%`)
+    .limit(20) as { data: MemberSearchResult[] | null; error: { message: string } | null }
+
+  if (error) return { error: error.message, results: [] }
+  return { error: null, results: data ?? [] }
+}
+
+/**
+ * Re-assign a business listing to a different member.
+ *
+ * Updates `businesses.owner_id` only. Conversations are deliberately NOT
+ * re-routed — past message threads stay attributed to the previous owner
+ * (history is preserved). New inquiries land in the new owner's inbox
+ * because the listing now points at them.
+ *
+ * super_admin only. Refuses if the target user has no profile row, isn't
+ * a real EO member, or is the same as the current owner.
+ */
+export async function transferBusinessOwnership(
+  businessId: string,
+  newOwnerId: string
+): Promise<{ error: string | null }> {
+  const ctx = await requireAdmin()
+  if (ctx.error) return { error: ctx.error }
+  if (ctx.role !== 'super_admin') return { error: 'Super admin only' }
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return { error: 'SUPABASE_SERVICE_ROLE_KEY not configured on the server' }
+  }
+
+  const svc = adminDb()
+
+  // Verify the business exists and grab the current owner.
+  const { data: biz } = await svc
+    .from('businesses')
+    .select('id, name, owner_id')
+    .eq('id', businessId)
+    .maybeSingle() as { data: { id: string; name: string; owner_id: string } | null }
+  if (!biz) return { error: 'Business not found' }
+  if (biz.owner_id === newOwnerId) return { error: 'Already owned by this member' }
+
+  // Verify the new owner has a profile (i.e. is a real registered member,
+  // not an arbitrary UUID). Also surfaces a friendlier name in the result.
+  const { data: newOwner } = await svc
+    .from('profiles')
+    .select('id, full_name, status')
+    .eq('id', newOwnerId)
+    .maybeSingle() as { data: { id: string; full_name: string | null; status: string } | null }
+  if (!newOwner) return { error: 'New owner not found in members directory' }
+  if (newOwner.status === 'suspended') return { error: 'Cannot transfer to a suspended member' }
+
+  const { error } = await svc
+    .from('businesses')
+    .update({ owner_id: newOwnerId })
+    .eq('id', businessId)
+  if (error) return { error: error.message }
+
+  revalidatePath('/admin/listings')
+  revalidatePath('/marketplace')
+  revalidatePath(`/marketplace/${businessId}`)
+  // Both old and new owners' dashboards need to reflect the change.
+  revalidatePath('/dashboard')
+  revalidatePath('/dashboard/services')
+  revalidatePath('/dashboard/business/edit')
+  return { error: null }
+}
+
 // ── Chapter admin scope assignment (super_admin only) ────────
 
 export async function setChapterAdminScope(
