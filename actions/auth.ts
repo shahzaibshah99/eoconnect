@@ -9,8 +9,6 @@ const SignUpSchema = z.object({
   fullName: z.string().min(2, 'Full name required'),
   email: z.string().email('Invalid email'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
-  chapter: z.string().optional(),
-  membershipType: z.enum(['current_member', 'alumni', 'accelerator'], { message: 'Select your EO membership type' }),
 })
 
 const SignInSchema = z.object({
@@ -25,8 +23,6 @@ export async function signUp(formData: FormData): Promise<AuthResult> {
     fullName: formData.get('fullName'),
     email: formData.get('email'),
     password: formData.get('password'),
-    chapter: formData.get('chapter'),
-    membershipType: formData.get('membershipType'),
   })
 
   if (!parsed.success) {
@@ -38,10 +34,13 @@ export async function signUp(formData: FormData): Promise<AuthResult> {
     email: parsed.data.email,
     password: parsed.data.password,
     options: {
+      // Only full_name goes into raw_user_meta_data — handle_new_user
+      // trigger picks it up and creates the profile row. EO membership
+      // type and chapter are NOT collected at signup; they're collected
+      // in the structured /onboarding form after email confirmation
+      // (see SignupForm comment for the full reasoning).
       data: {
         full_name: parsed.data.fullName,
-        eo_chapter: parsed.data.chapter,
-        eo_membership_type: parsed.data.membershipType,
       },
       emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
     },
@@ -49,17 +48,8 @@ export async function signUp(formData: FormData): Promise<AuthResult> {
 
   if (error) return { error: error.message }
 
-  // Save membership_type to profile (handle_new_user trigger creates the row)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db = supabase as any
-  const { data: { user: newUser } } = await supabase.auth.getUser()
-  if (newUser) {
-    await db.from('profiles')
-      .update({ eo_membership_type: parsed.data.membershipType })
-      .eq('id', newUser.id)
-  }
-
-  // Fire-and-forget welcome email (Supabase will send the verification email separately)
+  // Welcome email — fire-and-forget so the action returns fast. Supabase
+  // sends the verification email separately through its own SMTP config.
   void sendEmail({
     to: parsed.data.email,
     subject: 'Welcome to Member Market',

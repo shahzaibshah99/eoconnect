@@ -5,14 +5,32 @@ import { signUp } from '@/actions/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { GoogleButton } from './google-button'
 import Link from 'next/link'
 
+/**
+ * Signup form: collects only the bare minimum needed to create an auth
+ * user — full name, email, password.
+ *
+ * EO Membership Type and EO Chapter are deliberately NOT collected here.
+ * Two reasons:
+ *
+ *  1. With email confirmation enabled, supabase.auth.signUp() doesn't
+ *     create a session, so the post-signup profile UPDATE silently
+ *     dropped the membership_type field.
+ *
+ *  2. The chapter field on this form was free text. The rest of the app
+ *     (proxy gate, marketplace filters, admin scope) needs the structured
+ *     chapter values (region, chapter_country, chapter_city). The
+ *     onboarding screen has the proper ChapterPicker for that, so we
+ *     route every new user through it after confirmation.
+ *
+ * This means signup → email confirm → /onboarding (collect chapter +
+ * membership type with the structured picker) → /dashboard/business/new.
+ */
 export function SignupForm() {
   const [error, setError] = useState<string | null>(null)
-  const [membershipType, setMembershipType] = useState('')
   const [isPending, startTransition] = useTransition()
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -52,37 +70,22 @@ export function SignupForm() {
           )}
           <div className="space-y-2">
             <Label htmlFor="fullName">Full Name</Label>
-            <Input id="fullName" name="fullName" placeholder="Alex Thompson" required />
+            <Input id="fullName" name="fullName" placeholder="Alex Thompson" required autoComplete="name" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="email">Membership Email</Label>
-            <Input id="email" name="email" type="email" placeholder="you@company.com" required />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="membershipType">EO Membership Type *</Label>
-            <Select value={membershipType} onValueChange={(v: string | null) => setMembershipType(v ?? '')}>
-              <SelectTrigger id="membershipType">
-                <SelectValue placeholder="Select your status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="current_member">Current EO Member</SelectItem>
-                <SelectItem value="alumni">EO Alumni</SelectItem>
-                <SelectItem value="accelerator">EO Accelerator</SelectItem>
-              </SelectContent>
-            </Select>
-            <input type="hidden" name="membershipType" value={membershipType} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="chapter">EO Chapter</Label>
-            <Input id="chapter" name="chapter" placeholder="e.g. EO London" />
+            <Input id="email" name="email" type="email" placeholder="you@company.com" required autoComplete="email" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="password">Password</Label>
-            <Input id="password" name="password" type="password" placeholder="Min. 8 characters" required minLength={8} />
+            <Input id="password" name="password" type="password" placeholder="Min. 8 characters" required minLength={8} autoComplete="new-password" />
           </div>
           <Button type="submit" className="w-full bg-primary text-primary-foreground font-bold" disabled={isPending}>
             {isPending ? 'Creating account…' : 'Create Account'}
           </Button>
+          <p className="text-xs text-muted-foreground text-center pt-1">
+            We&apos;ll ask about your EO chapter and membership type after you confirm your email.
+          </p>
         </form>
 
         <p className="text-xs text-muted-foreground text-center mt-4">
