@@ -6,6 +6,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { setBusinessStatusAdmin } from '@/actions/admin'
+import { AdminDeleteListingButton } from '@/components/admin/delete-listing-button'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 
@@ -139,6 +140,7 @@ function ListingRow({ listing }: { listing: AdminListing }) {
               Pause
             </Button>
           )}
+          <AdminDeleteListingButton businessId={listing.id} businessName={listing.name} />
         </div>
       </td>
     </tr>

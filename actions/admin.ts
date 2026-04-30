@@ -302,6 +302,60 @@ export async function setBusinessStatusAdmin(
   return { error: null }
 }
 
+/**
+ * Permanent admin delete of a listing.
+ *
+ * Caller must pass the business's exact name as `confirmName` to guard
+ * against accidental deletes — same friction as the owner-side delete.
+ *
+ * Chapter admins can only delete businesses owned by members within their
+ * scope (country + optional city). Super admin bypasses the scope check.
+ *
+ * Schema-level ON DELETE CASCADE handles services, listing_analytics,
+ * reviews, and ad_campaigns. conversations.listing_id is set null so
+ * past message threads survive without their listing reference.
+ */
+export async function deleteBusinessAdmin(
+  id: string,
+  confirmName: string
+): Promise<{ error: string | null }> {
+  const ctx = await requireAdmin()
+  if (ctx.error) return { error: ctx.error }
+  if (!ctx.role) return { error: 'Not authorized' }
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return { error: 'SUPABASE_SERVICE_ROLE_KEY not configured on the server' }
+  }
+
+  const svc = adminDb()
+
+  if (!(await targetInScope(svc, ctx as { role: 'chapter_admin' | 'super_admin'; scopeCountry: string | null; scopeCity: string | null }, 'businesses', id))) {
+    return { error: 'This business is outside your chapter scope' }
+  }
+
+  // Re-verify the typed name on the server. Don't trust the client to
+  // have done this gate correctly.
+  const { data: biz } = await svc
+    .from('businesses')
+    .select('id, name')
+    .eq('id', id)
+    .maybeSingle() as { data: { id: string; name: string } | null }
+
+  if (!biz) return { error: 'Business not found' }
+  if (biz.name.trim().toLowerCase() !== confirmName.trim().toLowerCase()) {
+    return { error: `Type the business name exactly to confirm: "${biz.name}"` }
+  }
+
+  const { error } = await svc.from('businesses').delete().eq('id', id)
+  if (error) return { error: error.message }
+
+  revalidatePath('/admin/listings')
+  revalidatePath('/marketplace')
+  revalidatePath('/dashboard')
+  revalidatePath('/dashboard/services')
+  revalidatePath('/dashboard/business/edit')
+  return { error: null }
+}
+
 // ── Chapter admin scope assignment (super_admin only) ────────
 
 export async function setChapterAdminScope(
