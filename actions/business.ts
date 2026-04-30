@@ -7,6 +7,10 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { PORTFOLIO_MAX_TOTAL_BYTES, formatBytes } from '@/lib/portfolio-limits'
+import { normalizeWebsite } from '@/lib/normalize-website'
+
+const DUPLICATE_WEBSITE_MESSAGE =
+  'You already have a business with this website. Edit the existing one or use a different URL.'
 
 /**
  * Sums HEAD-fetched Content-Length for a list of public Supabase Storage URLs.
@@ -89,6 +93,24 @@ export async function createBusiness(formData: FormData): Promise<BusinessAction
   const parsed = BusinessSchema.safeParse(raw)
   if (!parsed.success) return { error: parsed.error.issues[0].message }
 
+  // Block this owner from creating a second business with the same
+  // website. Andrew + Shahzaib settled on (owner_id, website) as the
+  // qualifying criteria — names alone are too generic to be a unique
+  // signal. Migration 016's partial unique index is the real backstop;
+  // this pre-check just gives a friendlier error than the raw 23505.
+  const normalizedWebsite = normalizeWebsite(parsed.data.website)
+  if (normalizedWebsite) {
+    const { data: existingDup } = await db
+      .from('businesses')
+      .select('id')
+      .eq('owner_id', user.id)
+      .eq('website_normalized', normalizedWebsite)
+      .limit(1) as { data: Array<{ id: string }> | null }
+    if (existingDup && existingDup.length > 0) {
+      return { error: DUPLICATE_WEBSITE_MESSAGE }
+    }
+  }
+
   // Files now come in as URLs (uploaded directly to Supabase Storage from
   // the client) — keeps the action body small enough for Vercel's ~4.5MB cap.
   // Legacy File-object fallback still supported for older clients.
@@ -163,9 +185,17 @@ export async function createBusiness(formData: FormData): Promise<BusinessAction
         status: 'published',
       })
       .select('id')
-      .single()
+      .single() as { data: { id: string } | null; error: { code?: string; message: string } | null }
 
-    if (error) return { error: error.message }
+    if (error) {
+      // 23505 = Postgres unique_violation. Catch the race that beat the
+      // pre-check (two concurrent inserts with the same website under
+      // the same owner) and surface the same friendly error.
+      if (error.code === '23505') {
+        return { error: DUPLICATE_WEBSITE_MESSAGE }
+      }
+      return { error: error.message }
+    }
 
     // Mark new-user onboarding fully complete (only if not already set).
     // Existing users were grandfathered in migration 005, so this is a no-op for them.
@@ -231,6 +261,24 @@ export async function updateBusiness(id: string, formData: FormData): Promise<Bu
   const parsed = BusinessSchema.safeParse(raw)
   if (!parsed.success) return { error: parsed.error.issues[0].message }
 
+  // Same duplicate-website guard as createBusiness, but excluding the
+  // row being updated (otherwise saving without changing the URL would
+  // always fail). Scoped to existing.owner_id so admin edits don't
+  // accidentally false-match against the admin's own businesses.
+  const normalizedWebsite = normalizeWebsite(parsed.data.website)
+  if (normalizedWebsite) {
+    const { data: clash } = await db
+      .from('businesses')
+      .select('id')
+      .eq('owner_id', existing.owner_id)
+      .eq('website_normalized', normalizedWebsite)
+      .neq('id', id)
+      .limit(1) as { data: Array<{ id: string }> | null }
+    if (clash && clash.length > 0) {
+      return { error: DUPLICATE_WEBSITE_MESSAGE }
+    }
+  }
+
   // URL strings preferred (direct client upload). File-object fallback kept
   // for backward compat with stale clients.
   let logo_url: string | undefined = (formData.get('logo_url') as string | null) ?? undefined
@@ -290,8 +338,13 @@ export async function updateBusiness(id: string, formData: FormData): Promise<Bu
       .from('businesses')
       .update(updateData)
       .eq('id', id)
-      .eq('owner_id', existing.owner_id)
-    if (error) return { error: error.message }
+      .eq('owner_id', existing.owner_id) as { error: { code?: string; message: string } | null }
+    if (error) {
+      if (error.code === '23505') {
+        return { error: DUPLICATE_WEBSITE_MESSAGE }
+      }
+      return { error: error.message }
+    }
 
     // Refresh search embedding (fire-and-forget)
     void refreshBusinessEmbedding(db, id)
