@@ -35,19 +35,22 @@ export function MessagesNavLink({
   useEffect(() => {
     if (!userId) return
     const supabase = createClient()
+    // We rely on Supabase RLS (the messages-select policy gates rows to
+    // conversation participants) to ensure the channel only receives
+    // payloads for conversations the user is in — there's no built-in
+    // server-side filter for "addressed to me" in postgres_changes. The
+    // sender_id check below is a client-side guard so we don't bump the
+    // badge for messages the user themselves just sent.
     const channel = supabase
       .channel(`messages-nav-${userId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
-          const m = payload.new as { sender_id: string }
-          // Only count messages from someone OTHER than us. We don't filter on
-          // conversation here — the realtime channel doesn't know our list of
-          // conversations, but Supabase RLS already restricts what we can see.
-          if (m.sender_id !== userId) {
-            setCount(c => c + 1)
-          }
+          const m = payload.new as { sender_id?: string } | null
+          if (!m || typeof m.sender_id !== 'string') return
+          if (m.sender_id === userId) return
+          setCount(c => c + 1)
         }
       )
       .subscribe()

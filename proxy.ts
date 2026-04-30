@@ -14,15 +14,27 @@ type ProfileRow = {
 
 export async function proxy(request: NextRequest) {
   const { supabase, response } = createMiddlewareClient(request)
-  const { data: { session } } = await supabase.auth.getSession()
-  const user = session?.user ?? null
+  // Use getUser() not getSession(): getSession() reads the cookie without
+  // verifying with the auth server. Supabase's own guidance is to use
+  // getUser() for any server-side gating where you actually trust the
+  // identity. Costs ~1 round-trip per request — worth it for the auth
+  // boundary downstream.
+  const { data: { user } } = await supabase.auth.getUser()
   const pathname = request.nextUrl.pathname
 
   // Build redirect targets against the configured public URL when possible.
   // Behind a reverse proxy (Dokploy/Traefik) that doesn't forward the Host
   // header, request.url shows the container's internal bind ('0.0.0.0:3000')
   // and that origin leaks into every middleware redirect target.
-  const publicBase = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '')
+  //
+  // In production we *require* NEXT_PUBLIC_SITE_URL — we'd rather log a
+  // clear error than silently issue redirects to 0.0.0.0:3000 in a customer's
+  // browser. In dev/preview, fall back to request.url so local development
+  // still works.
+  const publicBase = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, '') || ''
+  if (!publicBase && process.env.NODE_ENV === 'production') {
+    console.error('[proxy] NEXT_PUBLIC_SITE_URL not set — middleware redirects will use request.url and may leak the container origin')
+  }
   const redirectTo = (path: string) =>
     NextResponse.redirect(new URL(path, publicBase || request.url))
 
@@ -132,13 +144,17 @@ export async function proxy(request: NextRequest) {
       pathname.startsWith('/admin')
 
     if (!exemptFromBusinessGate && p.eo_membership_type && p.region) {
-      const { data: business } = await supabase
+      // .maybeSingle() returns null for both 0 rows AND >=2 rows — bricked
+      // multi-business users in an infinite "create your first business"
+      // loop after migration 007 lifted the unique(owner_id) constraint.
+      // .limit(1) + array length check distinguishes correctly.
+      const { data: businesses } = await supabase
         .from('businesses')
         .select('id')
         .eq('owner_id', user.id)
-        .maybeSingle() as { data: { id: string } | null; error: unknown }
+        .limit(1) as { data: Array<{ id: string }> | null; error: unknown }
 
-      if (!business) {
+      if (!businesses || businesses.length === 0) {
         return redirectTo('/dashboard/business/new')
       }
     }

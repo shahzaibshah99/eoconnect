@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { sendEmail, adApprovedEmail, adRejectedEmail } from '@/lib/email/send'
+import { siteUrl } from '@/lib/site-url'
 
 const CampaignSchema = z.object({
   format: z.enum(['banner', 'sponsored_listing']),
@@ -76,7 +77,7 @@ export async function createCampaign(formData: FormData): Promise<CreateCampaign
   const stripe = getStripe()
   if (stripe) {
     try {
-      const origin = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'
+      const origin = siteUrl()
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
         line_items: [{
@@ -202,10 +203,10 @@ async function notifyOwner(campaignId: string, kind: 'approved' | 'rejected', re
       .eq('id', c.business.owner_id)
       .single() as { data: { eo_membership_email: string | null } | null }
     if (!owner?.eo_membership_email) return
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'
+    const url = siteUrl()
     const tpl = kind === 'approved'
-      ? adApprovedEmail(c.business.name, siteUrl, c.id)
-      : adRejectedEmail(c.business.name, reason ?? 'Did not meet guidelines', siteUrl, c.id)
+      ? adApprovedEmail(c.business.name, url, c.id)
+      : adRejectedEmail(c.business.name, reason ?? 'Did not meet guidelines', url, c.id)
     await sendEmail({ to: owner.eo_membership_email, subject: tpl.subject, html: tpl.html })
   } catch (err) {
     console.error('ad notify failed:', err)
@@ -229,7 +230,7 @@ export async function topUpCampaign(id: string, amount: number): Promise<{ error
   if (!stripe) return { error: 'Payments not configured' }
 
   try {
-    const origin = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'
+    const origin = siteUrl()
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       line_items: [{

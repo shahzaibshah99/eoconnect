@@ -78,7 +78,16 @@ export function MessageThread({
       setMessages(prev => {
         const seen = new Set(prev.map(m => m.id))
         const additions = incoming.filter(m => !seen.has(m.id))
-        return additions.length === 0 ? prev : [...prev, ...additions]
+        if (additions.length === 0) return prev
+        // Re-sort by created_at after merging. Realtime and polling can race —
+        // a poll fetch that started before a realtime event arrives can land
+        // older rows after newer ones. Without this re-sort, the visual
+        // ordering breaks and the polling cursor (max created_at, computed
+        // below) would be wrong, causing the next poll to refetch already-
+        // seen rows or, worse, skip the gap entirely.
+        return [...prev, ...additions].sort(
+          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        )
       })
     }
 
@@ -100,8 +109,19 @@ export function MessageThread({
 
     // Path 2: polling — safety net if realtime is silent.
     const fetchSinceLast = async () => {
+      // Bail before we even hit the network if the effect has already torn
+      // down — switching conversations rapidly otherwise queues stale
+      // fetches that resolve and dump into the new conversation's state.
+      if (cancelled) return
+      // Use the MAX created_at across all known messages, not the array tail.
+      // After merge() re-sorts the array tail is the newest, but we don't
+      // rely on that invariant — if any caller ever appends without sorting,
+      // a tail-based cursor would silently regress and trigger refetch loops.
       const lastTs = messagesRef.current.length > 0
-        ? messagesRef.current[messagesRef.current.length - 1].created_at
+        ? messagesRef.current.reduce(
+            (max, m) => (m.created_at > max ? m.created_at : max),
+            messagesRef.current[0].created_at
+          )
         : new Date(0).toISOString()
       const { data, error: fetchErr } = await supabase
         .from('messages')
@@ -109,6 +129,7 @@ export function MessageThread({
         .eq('conversation_id', conversationId)
         .gt('created_at', lastTs)
         .order('created_at', { ascending: true })
+      if (cancelled) return
       if (fetchErr) {
         console.warn('[chat] poll error:', fetchErr.message)
         return

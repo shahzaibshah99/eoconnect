@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { sendEmail, newReviewEmail } from '@/lib/email/send'
+import { siteUrl } from '@/lib/site-url'
 
 const ReviewSchema = z.object({
   business_id: z.string().uuid(),
@@ -56,8 +57,7 @@ export async function submitReview(formData: FormData): Promise<{ error: string 
         data: { full_name: string } | null
       }
       if (!owner?.eo_membership_email) return
-      const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'
-      const tpl = newReviewEmail(reviewer?.full_name ?? 'A member', biz.name, parsed.data.rating, parsed.data.body, siteUrl, parsed.data.business_id)
+      const tpl = newReviewEmail(reviewer?.full_name ?? 'A member', biz.name, parsed.data.rating, parsed.data.body, siteUrl(), parsed.data.business_id)
       await sendEmail({ to: owner.eo_membership_email, subject: tpl.subject, html: tpl.html })
     } catch (err) {
       console.error('review email failed:', err)

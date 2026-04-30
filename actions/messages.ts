@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import { after } from 'next/server'
 import { z } from 'zod'
 import { sendEmail, newMessageEmail } from '@/lib/email/send'
+import { siteUrl } from '@/lib/site-url'
 
 const ConversationSchema = z.object({
   owner_id: z.string().uuid('Invalid owner'),
@@ -79,8 +80,7 @@ export async function sendMessage(formData: FormData): Promise<{ error: string |
         const { data: biz } = await db.from('businesses').select('name').eq('id', convRow.listing_id).single()
         businessName = biz?.name ?? null
       }
-      const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'
-      const tpl = newMessageEmail(senderProfile?.full_name ?? 'Someone', businessName, parsed.data.body.slice(0, 200), siteUrl, parsed.data.conversation_id)
+      const tpl = newMessageEmail(senderProfile?.full_name ?? 'Someone', businessName, parsed.data.body.slice(0, 200), siteUrl(), parsed.data.conversation_id)
       const result = await sendEmail({ to: recipient.eo_membership_email, subject: tpl.subject, html: tpl.html })
       if (result.ok) {
         console.log(`[email] message notification sent to ${recipient.eo_membership_email}`)
@@ -94,21 +94,6 @@ export async function sendMessage(formData: FormData): Promise<{ error: string |
 
   revalidatePath('/dashboard/messages')
   return { error: null }
-}
-
-export async function markMessagesRead(conversationId: string): Promise<void> {
-  const supabase = await createClient()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db = supabase as any
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return
-
-  await db
-    .from('messages')
-    .update({ read_at: new Date().toISOString() })
-    .eq('conversation_id', conversationId)
-    .neq('sender_id', user.id)
-    .is('read_at', null)
 }
 
 /**
@@ -143,14 +128,18 @@ export async function sendInquiry(input: {
   }
 
   // Reuse an existing conversation about this listing if there is one.
-  const { data: existing } = await db
+  // Use .limit(1) — .maybeSingle() returns null for both "no rows" AND
+  // ">=2 rows" cases. If a duplicate was ever created (race, manual
+  // insert, etc.), every subsequent inquiry would fan out new dupes.
+  const { data: existingRows } = await db
     .from('conversations')
     .select('id')
     .eq('listing_id', business_id)
     .contains('participant_ids', [user.id])
-    .maybeSingle() as { data: { id: string } | null }
+    .order('created_at', { ascending: true })
+    .limit(1) as { data: Array<{ id: string }> | null }
 
-  let conversationId = existing?.id
+  let conversationId = existingRows && existingRows.length > 0 ? existingRows[0].id : undefined
   if (!conversationId) {
     const { data: created, error: createErr } = await db
       .from('conversations')
@@ -210,12 +199,11 @@ export async function sendInquiry(input: {
         return
       }
       const { data: biz } = await db.from('businesses').select('name').eq('id', business_id).single()
-      const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'
       const tpl = newMessageEmail(
         senderProfile?.full_name ?? 'Someone',
         biz?.name ?? null,
         messageBody.slice(0, 200),
-        siteUrl,
+        siteUrl(),
         finalConversationId!
       )
       const result = await sendEmail({ to: recipient.eo_membership_email, subject: tpl.subject, html: tpl.html })
@@ -250,16 +238,19 @@ export async function startConversation(formData: FormData) {
 
   if (user.id === owner_id) redirect('/dashboard/messages')
 
-  // Check if this user already has a conversation about this listing
-  const { data: existing } = await db
+  // Check if this user already has a conversation about this listing.
+  // Same .limit(1) pattern as sendInquiry — guards against the
+  // .maybeSingle() 0-vs->=2 ambiguity creating duplicate threads.
+  const { data: existingRows } = await db
     .from('conversations')
     .select('id')
     .eq('listing_id', business_id)
     .contains('participant_ids', [user.id])
-    .maybeSingle()
+    .order('created_at', { ascending: true })
+    .limit(1) as { data: Array<{ id: string }> | null }
 
-  if (existing) {
-    redirect(`/dashboard/messages?conversation=${existing.id}`)
+  if (existingRows && existingRows.length > 0) {
+    redirect(`/dashboard/messages?conversation=${existingRows[0].id}`)
   }
 
   const { data: conversation, error } = await db

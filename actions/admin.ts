@@ -384,7 +384,13 @@ export async function searchMembersForTransfer(query: string): Promise<{
 
   const q = query.trim()
   if (q.length < 2) return { error: null, results: [] }
+  // Reject control characters that would break the PostgREST `or` filter
+  // syntax (commas, parens, dots are structural separators). We can't
+  // safely escape them with the current PostgREST filter grammar — easier
+  // to refuse than risk an injection.
+  if (/[,()*]/.test(q)) return { error: null, results: [] }
 
+  // Escape ilike wildcards so a user typing '%' doesn't match everything.
   const safe = q.replace(/[%_\\]/g, m => '\\' + m)
   const { data, error } = await ctx.db
     .from('profiles')

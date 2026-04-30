@@ -71,9 +71,18 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   )
 
   // Split by user's role in each conversation. Provider bucket = listings
-  // they own; customer bucket = everything else (inquiries they sent).
+  // they own; customer bucket = inquiries they sent on listings they don't own.
+  //
+  // Orphaned conversations (listing_id IS NULL because the business was
+  // deleted) end up with ownerId === null. We exclude them from BOTH buckets
+  // rather than letting them fall into "customer" by default — without the
+  // listing we can't tell which side the user was on, and showing past
+  // inbound inquiries on a deleted listing under "As a customer" misled
+  // providers into thinking *they* had sent those messages.
   const providerConversations = conversationsWithNames.filter(c => c.ownerId === user.id)
-  const customerConversations = conversationsWithNames.filter(c => c.ownerId !== user.id)
+  const customerConversations = conversationsWithNames.filter(
+    c => c.ownerId !== null && c.ownerId !== user.id
+  )
 
   if (!business) {
     // No business yet — user is purely on the customer side. Their

@@ -280,7 +280,17 @@ export async function updateBusiness(id: string, formData: FormData): Promise<Bu
     if (logo_url) updateData.logo_url = logo_url
     if (cover_url) updateData.cover_url = cover_url
 
-    const { error } = await db.from('businesses').update(updateData).eq('id', id)
+    // Belt-and-braces: scope the UPDATE to the same owner_id we just
+    // authorized. RLS already enforces this, but if RLS were ever
+    // accidentally relaxed (or this code ran with a service-role client),
+    // we'd still only mutate the row we checked. Note: existing.owner_id is
+    // used (not user.id) so admin overrides above still work — admins keep
+    // editing as the listing's actual owner.
+    const { error } = await db
+      .from('businesses')
+      .update(updateData)
+      .eq('id', id)
+      .eq('owner_id', existing.owner_id)
     if (error) return { error: error.message }
 
     // Refresh search embedding (fire-and-forget)

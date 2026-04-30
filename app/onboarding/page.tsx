@@ -26,13 +26,16 @@ export default async function OnboardingPage() {
 
   // Already onboarded? Skip to business wizard or app.
   if (profile?.eo_membership_type && profile?.region) {
+    // .limit(1) instead of .maybeSingle() — the latter returns null for
+    // both 0 and >=2 rows. Multi-business users were getting bounced to
+    // /dashboard/business/new instead of /marketplace.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: business } = await (supabase as any)
+    const { data: businesses } = await (supabase as any)
       .from('businesses')
       .select('id')
       .eq('owner_id', user.id)
-      .maybeSingle()
-    redirect(business ? '/marketplace' : '/dashboard/business/new')
+      .limit(1) as { data: Array<{ id: string }> | null }
+    redirect(businesses && businesses.length > 0 ? '/marketplace' : '/dashboard/business/new')
   }
 
   return (

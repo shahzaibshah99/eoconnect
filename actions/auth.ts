@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { sendEmail, welcomeEmail } from '@/lib/email/send'
+import { siteUrl } from '@/lib/site-url'
 
 const SignUpSchema = z.object({
   fullName: z.string().min(2, 'Full name required'),
@@ -29,6 +30,18 @@ export async function signUp(formData: FormData): Promise<AuthResult> {
     return { error: parsed.error.issues[0].message }
   }
 
+  // Resolve the public origin up-front. siteUrl() throws in production if
+  // NEXT_PUBLIC_SITE_URL is unset — without this guard the unhandled throw
+  // surfaces in the browser as the generic "Something went wrong" error
+  // boundary, with no actionable message for the user or the operator.
+  let base: string
+  try {
+    base = siteUrl()
+  } catch (err) {
+    console.error('[auth] siteUrl resolution failed:', err)
+    return { error: 'Sign-up is not configured on this deployment. Please contact support.' }
+  }
+
   const supabase = await createClient()
   const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
@@ -42,7 +55,7 @@ export async function signUp(formData: FormData): Promise<AuthResult> {
       data: {
         full_name: parsed.data.fullName,
       },
-      emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
+      emailRedirectTo: `${base}/auth/callback`,
     },
   })
 
@@ -64,10 +77,13 @@ export async function signUp(formData: FormData): Promise<AuthResult> {
 
   // Welcome email — fire-and-forget so the action returns fast. Supabase
   // sends the verification email separately through its own SMTP config.
+  // Reusing the already-resolved `base` so a transient env miss can never
+  // throw inside the unawaited promise (which would silently terminate it
+  // on serverless without a stack we can read).
   void sendEmail({
     to: parsed.data.email,
     subject: 'Welcome to Member Market',
-    html: welcomeEmail(parsed.data.fullName, process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'),
+    html: welcomeEmail(parsed.data.fullName, base),
   })
 
   redirect('/verify')
@@ -111,13 +127,11 @@ export async function requestPasswordReset(formData: FormData): Promise<AuthResu
   const parsed = ResetEmailSchema.safeParse({ email: formData.get('email') })
   if (!parsed.success) return { error: parsed.error.issues[0].message }
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim()
-  if (!siteUrl) {
-    // Without a site URL the email link would be `undefined/reset-password`
-    // — Supabase silently sends the email but the link is broken on click.
-    // Bail loudly so the user sees a real error instead of "check your email"
-    // followed by nothing useful.
-    console.error('[auth] NEXT_PUBLIC_SITE_URL is not set — password reset email link would be invalid')
+  let base: string
+  try {
+    base = siteUrl()
+  } catch (err) {
+    console.error('[auth] siteUrl resolution failed:', err)
     return { error: 'Password reset is not configured on this deployment. Please contact support.' }
   }
 
@@ -127,7 +141,6 @@ export async function requestPasswordReset(formData: FormData): Promise<AuthResu
   // handle the exchange — and on transient failures or repeat clicks it
   // threw "An unexpected response was received from the server" via the
   // Next.js error boundary. Server-side exchange is more reliable.
-  const base = siteUrl.replace(/\/$/, '')
   const next = encodeURIComponent('/reset-password?type=recovery')
 
   const supabase = await createClient()
