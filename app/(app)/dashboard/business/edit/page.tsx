@@ -19,7 +19,7 @@ export default async function MyBusinessesPage() {
 
   const { data: businesses } = await db
     .from('businesses')
-    .select('id, name, tagline, logo_url, status, city, country, created_at')
+    .select('id, name, tagline, logo_url, status, paused_by, city, country, created_at')
     .eq('owner_id', user.id)
     .order('created_at', { ascending: false }) as {
       data: Array<{
@@ -28,6 +28,7 @@ export default async function MyBusinessesPage() {
         tagline: string | null
         logo_url: string | null
         status: 'draft' | 'published' | 'paused'
+        paused_by: 'owner' | 'admin' | null
         city: string | null
         country: string | null
         created_at: string
@@ -75,6 +76,11 @@ export default async function MyBusinessesPage() {
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-semibold">{b.name}</h3>
                 <StatusBadge status={b.status} />
+                {b.status === 'paused' && b.paused_by === 'admin' && (
+                  <Badge className="border border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-[10px]">
+                    Admin hold
+                  </Badge>
+                )}
               </div>
               {b.tagline && <p className="text-sm text-muted-foreground truncate mt-0.5">{b.tagline}</p>}
               <p className="text-xs text-muted-foreground mt-0.5">

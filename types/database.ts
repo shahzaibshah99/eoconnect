@@ -53,6 +53,8 @@ export interface Business {
   email: string | null
   social_links: Json
   status: BusinessStatus
+  /** Who paused the listing. Null when status is not 'paused'. */
+  paused_by: 'owner' | 'admin' | null
   category_ids: string[]
   tags: string[]
   created_at: string

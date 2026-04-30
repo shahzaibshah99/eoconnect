@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { BusinessEditForm } from '@/components/forms/business-edit-form'
+import { ListingPauseButton } from '@/components/business/listing-pause-button'
 import type { Business, Category } from '@/types/database'
 
 interface Props {
@@ -44,6 +45,14 @@ export default async function EditMyBusinessPage({ params }: Props) {
           View Listing
         </Link>
       </div>
+      <div className="mb-6">
+        <ListingPauseButton
+          businessId={business.id}
+          status={business.status}
+          pausedBy={business.paused_by ?? null}
+        />
+      </div>
+
       <BusinessEditForm
         business={business as Business}
         categories={(categories ?? []) as Category[]}

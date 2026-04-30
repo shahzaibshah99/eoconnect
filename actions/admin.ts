@@ -289,7 +289,17 @@ export async function setBusinessStatusAdmin(
     return { error: 'This business is outside your chapter scope' }
   }
 
-  const { error } = await svc.from('businesses').update({ status }).eq('id', id)
+  // Stamp pause provenance in lockstep with status. When an admin pauses,
+  // we record paused_by='admin' so the member-side updateBusinessStatus
+  // refuses to resume it — preserving the moderation hold. When status
+  // moves off 'paused' we always clear paused_by, regardless of who
+  // originally set it (an admin resume is the canonical override).
+  const updateData: { status: typeof status; paused_by: 'owner' | 'admin' | null } = {
+    status,
+    paused_by: status === 'paused' ? 'admin' : null,
+  }
+
+  const { error } = await svc.from('businesses').update(updateData).eq('id', id)
   if (error) return { error: error.message }
   revalidatePath('/admin/listings')
   revalidatePath('/marketplace')

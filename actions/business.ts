@@ -352,6 +352,19 @@ export async function deleteBusiness(
   return { error: null }
 }
 
+/**
+ * Member-side status change. Owner-only: pause their own listing or
+ * resume one they themselves paused.
+ *
+ * Critically does NOT let an owner override an admin pause. If an admin
+ * paused the listing as a moderation action, only an admin can resume
+ * it — otherwise members could undo every moderation pause by clicking
+ * "Resume" on their dashboard.
+ *
+ * `paused_by` provenance is set/cleared here in lockstep with `status`:
+ *   - status='paused' → paused_by='owner'
+ *   - status='published' or 'draft' → paused_by=null
+ */
 export async function updateBusinessStatus(
   id: string,
   status: 'draft' | 'published' | 'paused'
@@ -362,9 +375,34 @@ export async function updateBusinessStatus(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Not authenticated' }
 
+  // Read current state to enforce the admin-pause-precedence rule.
+  // Scoped to owner_id so a member can't even see status of someone
+  // else's listing through this code path (RLS enforces this too).
+  const { data: existing } = await db
+    .from('businesses')
+    .select('status, paused_by, owner_id')
+    .eq('id', id)
+    .eq('owner_id', user.id)
+    .maybeSingle() as {
+      data: { status: 'draft' | 'published' | 'paused'; paused_by: 'owner' | 'admin' | null; owner_id: string } | null
+    }
+  if (!existing) return { error: 'Business not found or not owned by you' }
+
+  // The one rule that matters: if an admin paused this listing, the
+  // owner can't get out of paused state. They have to contact the
+  // admin or wait for the moderation hold to lift.
+  if (existing.status === 'paused' && existing.paused_by === 'admin' && status !== 'paused') {
+    return { error: 'This listing was paused by an administrator and can only be resumed by an administrator.' }
+  }
+
+  const updateData: { status: typeof status; paused_by: 'owner' | 'admin' | null } = {
+    status,
+    paused_by: status === 'paused' ? 'owner' : null,
+  }
+
   const { error } = await db
     .from('businesses')
-    .update({ status })
+    .update(updateData)
     .eq('id', id)
     .eq('owner_id', user.id)
 
