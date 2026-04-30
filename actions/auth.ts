@@ -121,9 +121,18 @@ export async function requestPasswordReset(formData: FormData): Promise<AuthResu
     return { error: 'Password reset is not configured on this deployment. Please contact support.' }
   }
 
+  // Route the recovery link through our /auth/callback route handler so
+  // the PKCE code exchange happens server-side. Pointing the email link
+  // straight at /reset-password let Supabase's client-side auto-detect
+  // handle the exchange — and on transient failures or repeat clicks it
+  // threw "An unexpected response was received from the server" via the
+  // Next.js error boundary. Server-side exchange is more reliable.
+  const base = siteUrl.replace(/\/$/, '')
+  const next = encodeURIComponent('/reset-password?type=recovery')
+
   const supabase = await createClient()
   const { error } = await supabase.auth.resetPasswordForEmail(parsed.data.email, {
-    redirectTo: `${siteUrl.replace(/\/$/, '')}/reset-password?type=recovery`,
+    redirectTo: `${base}/auth/callback?next=${next}`,
   })
 
   if (error) {

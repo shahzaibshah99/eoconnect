@@ -28,12 +28,19 @@ export async function proxy(request: NextRequest) {
 
   const protectedPaths = ['/dashboard', '/marketplace', '/admin', '/onboarding']
   const isProtected = protectedPaths.some(p => pathname.startsWith(p))
-  // Note: /suspended is intentionally NOT here. The suspended-status gate
-  // below redirects suspended users to /suspended; if /suspended were also
-  // an "authPage" the (user && isAuthPage) check above would bounce them
-  // straight back to /marketplace, which then bounces them back to
-  // /suspended — infinite loop. /suspended is its own special destination.
-  const authPages = ['/login', '/signup', '/reset-password', '/verify']
+  // Note on what's NOT in this list:
+  //   /suspended       — destination page for suspended users; bouncing
+  //                      it would loop with the suspended-status gate
+  //                      below.
+  //   /reset-password  — the password recovery flow goes through
+  //                      /auth/callback first, which leaves the user with
+  //                      an active recovery session. If /reset-password
+  //                      were in authPages, that session would bounce them
+  //                      to /marketplace before they can set a new
+  //                      password — broken UX. The page itself handles
+  //                      the recovery state via Supabase's PASSWORD_RECOVERY
+  //                      auth event + the ?type=recovery query param.
+  const authPages = ['/login', '/signup', '/verify']
   const isAuthPage = authPages.some(p => pathname.startsWith(p))
 
   if (!user && isProtected) {
