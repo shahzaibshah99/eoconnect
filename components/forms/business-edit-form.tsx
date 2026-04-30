@@ -14,6 +14,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Upload, X, FileText, ImageIcon } from 'lucide-react'
 import type { Business, Category } from '@/types/database'
 import { LocationPicker } from '@/components/forms/location-picker'
+import { YearPicker } from '@/components/forms/year-picker'
+import { TagInput } from '@/components/forms/tag-input'
 import {
   PORTFOLIO_MAX_FILES,
   PORTFOLIO_MAX_TOTAL_BYTES,
@@ -190,7 +192,11 @@ export function BusinessEditForm({ business, categories }: BusinessEditFormProps
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="founded_year">Founded Year</Label>
-            <Input id="founded_year" name="founded_year" type="number" value={formData.founded_year} onChange={e => update('founded_year', e.target.value)} min="1900" max={new Date().getFullYear()} />
+            <YearPicker
+              value={formData.founded_year}
+              onChange={(y) => update('founded_year', y)}
+            />
+            <input type="hidden" name="founded_year" value={formData.founded_year} />
           </div>
           <div className="space-y-2">
             <Label>Team Size</Label>
@@ -241,7 +247,15 @@ export function BusinessEditForm({ business, categories }: BusinessEditFormProps
         </div>
         <div className="space-y-2">
           <Label htmlFor="tags">Keywords / Tags</Label>
-          <Input id="tags" name="tags" value={formData.tags} onChange={e => update('tags', e.target.value)} placeholder="SaaS, fintech, B2B (comma-separated)" />
+          <TagInput
+            id="tags"
+            value={formData.tags}
+            onChange={(v) => update('tags', v)}
+            placeholder="SaaS, fintech, B2B…"
+            maxTags={10}
+          />
+          <input type="hidden" name="tags" value={formData.tags} />
+          <p className="text-xs text-muted-foreground">Press Enter or comma to add a tag.</p>
         </div>
         <div className="space-y-2">
           <Label htmlFor="website">Website</Label>
