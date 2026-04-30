@@ -8,6 +8,7 @@ type ProfileRow = {
   status: UserStatus
   eo_membership_type: EoMembershipType | null
   country: string | null
+  region: string | null
   onboarded_at: string | null
 }
 
@@ -27,7 +28,12 @@ export async function proxy(request: NextRequest) {
 
   const protectedPaths = ['/dashboard', '/marketplace', '/admin', '/onboarding']
   const isProtected = protectedPaths.some(p => pathname.startsWith(p))
-  const authPages = ['/login', '/signup', '/reset-password', '/verify', '/suspended']
+  // Note: /suspended is intentionally NOT here. The suspended-status gate
+  // below redirects suspended users to /suspended; if /suspended were also
+  // an "authPage" the (user && isAuthPage) check above would bounce them
+  // straight back to /marketplace, which then bounces them back to
+  // /suspended — infinite loop. /suspended is its own special destination.
+  const authPages = ['/login', '/signup', '/reset-password', '/verify']
   const isAuthPage = authPages.some(p => pathname.startsWith(p))
 
   if (!user && isProtected) {
@@ -43,7 +49,7 @@ export async function proxy(request: NextRequest) {
   // Single profile fetch for all gating below.
   let { data: profile } = await supabase
     .from('profiles')
-    .select('role, status, eo_membership_type, country, onboarded_at')
+    .select('role, status, eo_membership_type, country, region, onboarded_at')
     .eq('id', user.id)
     .maybeSingle() as { data: ProfileRow | null; error: unknown }
 
@@ -70,7 +76,7 @@ export async function proxy(request: NextRequest) {
 
       const refetch = await supabase
         .from('profiles')
-        .select('role, status, eo_membership_type, country, onboarded_at')
+        .select('role, status, eo_membership_type, country, region, onboarded_at')
         .eq('id', user.id)
         .maybeSingle() as { data: ProfileRow | null }
       profile = refetch.data
@@ -100,7 +106,16 @@ export async function proxy(request: NextRequest) {
       pathname.startsWith('/_next') ||
       pathname === '/'
 
-    if (!exemptFromOnboardingGate && (!p.eo_membership_type || !p.country)) {
+    // The gate fires until both `eo_membership_type` and `region` are set —
+    // these are the two mandatory fields the onboarding form writes.
+    //
+    // We deliberately use `region` here (not `country`). The structured
+    // location model lets a member pick a "Bridge" chapter (e.g. EO MEPA
+    // Bridge, EO LAC Bridge) which has region but no country. The earlier
+    // check on `country` falsely treated those members as "not onboarded"
+    // and bounced them to /onboarding, while the onboarding page checked
+    // `region` and bounced them away — infinite redirect loop.
+    if (!exemptFromOnboardingGate && (!p.eo_membership_type || !p.region)) {
       return redirectTo('/onboarding')
     }
 
@@ -109,7 +124,7 @@ export async function proxy(request: NextRequest) {
       pathname.startsWith('/dashboard/business/new') ||
       pathname.startsWith('/admin')
 
-    if (!exemptFromBusinessGate && p.eo_membership_type && p.country) {
+    if (!exemptFromBusinessGate && p.eo_membership_type && p.region) {
       const { data: business } = await supabase
         .from('businesses')
         .select('id')
