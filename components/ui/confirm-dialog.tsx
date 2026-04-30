@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
+import { isValidElement, useState, type ReactElement, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -62,9 +62,30 @@ export function ConfirmDialog({
     }
   }
 
+  // base-ui's <DialogTrigger render={element} /> clones the passed element
+  // and injects DialogTrigger's *own* children into it. When DialogTrigger
+  // has no children (which is the case here), the clone ends up with
+  // children set to undefined and any children inside the original element
+  // are dropped — the trigger renders as a styled button shell with no
+  // icon and no label.
+  //
+  // This was visible as: Manage Services Delete buttons rendering as
+  // solid red rectangles with no "Delete" text (Anam, mobile QA), and
+  // the listing Pause/Resume button rendering as a solid green rectangle
+  // with no label. Both were diagnosed as a contrast bug at first; the
+  // real cause was that the children never made it into the DOM.
+  //
+  // Fix: extract the trigger element's children and pass them through to
+  // DialogTrigger. base-ui then re-injects them when it clones, putting
+  // the icon + label back where they should be.
+  const triggerElement = isValidElement(trigger) ? (trigger as ReactElement<{ children?: ReactNode }>) : null
+  const triggerChildren = triggerElement?.props.children
+
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!isPending) { setOpen(v); if (!v) setError(null) } }}>
-      <DialogTrigger render={trigger as React.ReactElement} />
+      {triggerElement
+        ? <DialogTrigger render={triggerElement}>{triggerChildren}</DialogTrigger>
+        : <DialogTrigger>{trigger}</DialogTrigger>}
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
