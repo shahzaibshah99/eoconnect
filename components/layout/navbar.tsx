@@ -16,6 +16,7 @@ import { signOut } from '@/actions/auth'
 import type { Profile } from '@/types/database'
 import { cn } from '@/lib/utils'
 import { MessagesNavLink } from './messages-nav-link'
+import { SupportButton } from './support-button'
 
 interface NavbarProps {
   profile: Profile | null
@@ -116,6 +117,7 @@ export function Navbar({ profile, unreadMessages = 0, adsEnabled = false }: Navb
               Unread badge now lives on the nav link itself (see navLinks above).
               R2-11: NotificationBell hidden until alert behavior is defined.
               Bring back when push/in-app notifications ship. */}
+          <SupportButton memberName={profile?.full_name ?? null} />
           <ThemeToggle />
           <Link
             href="/dashboard/services/new"

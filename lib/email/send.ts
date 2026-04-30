@@ -47,6 +47,10 @@ export async function sendEmail(opts: {
   to: string
   subject: string
   html: string
+  /** Optional Reply-To header — used for support inquiries so the
+   *  support team can reply directly to the member without going
+   *  through the from-address (which is the platform mailbox). */
+  replyTo?: string
 }): Promise<{ ok: boolean; error?: string }> {
   const t = getTransport()
   if (!t) {
@@ -59,6 +63,7 @@ export async function sendEmail(opts: {
       to: opts.to,
       subject: opts.subject,
       html: opts.html,
+      replyTo: opts.replyTo,
     })
     return { ok: true }
   } catch (err) {
@@ -170,6 +175,55 @@ export function adRejectedEmail(businessName: string, reason: string, siteUrl: s
           Edit campaign
         </a>
       </p>
+    `)
+  }
+}
+
+/**
+ * Support inquiry from a signed-in member. Goes to support@member.market.
+ * Always includes a member-context block (id / name / email / chapter) so
+ * the support team can see who's asking without a separate lookup.
+ *
+ * The from-address is left as the platform default (accounts@member.market)
+ * because Hostinger rejects sends from addresses that aren't authenticated
+ * by SMTP_USER. The member's email is surfaced in the HTML body and added
+ * to Reply-To by the caller, so replying lands in their inbox naturally.
+ */
+export function supportInquiryEmail(input: {
+  member: { id: string; full_name: string; email: string | null; chapter: string | null }
+  subject: string
+  body: string
+}) {
+  const { member, subject, body } = input
+  const safeBody = escapeHtml(body).replace(/\n/g, '<br>')
+  const subjectLine = `Support inquiry from ${member.full_name || 'member'}: ${subject}`
+
+  return {
+    subject: subjectLine,
+    html: wrap('Support inquiry', `
+      <h1 style="font-size:18px;margin:0 0 12px;">New support inquiry</h1>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:13px;">
+        <tr>
+          <td style="padding:6px 8px;background:#fafafa;color:#666;width:120px;">Member</td>
+          <td style="padding:6px 8px;background:#fafafa;"><strong>${escapeHtml(member.full_name || '—')}</strong></td>
+        </tr>
+        <tr>
+          <td style="padding:6px 8px;color:#666;">User ID</td>
+          <td style="padding:6px 8px;"><code style="font-size:12px;">${escapeHtml(member.id)}</code></td>
+        </tr>
+        <tr>
+          <td style="padding:6px 8px;background:#fafafa;color:#666;">Email</td>
+          <td style="padding:6px 8px;background:#fafafa;">${member.email ? `<a href="mailto:${escapeHtml(member.email)}">${escapeHtml(member.email)}</a>` : '—'}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 8px;color:#666;">EO Chapter</td>
+          <td style="padding:6px 8px;">${escapeHtml(member.chapter || '—')}</td>
+        </tr>
+      </table>
+      <h2 style="font-size:15px;margin:24px 0 6px;">${escapeHtml(subject)}</h2>
+      <blockquote style="border-left:3px solid #0A2218;padding:12px 16px;margin:8px 0 0;background:#fafafa;font-size:14px;color:#333;line-height:1.5;">
+        ${safeBody}
+      </blockquote>
     `)
   }
 }
