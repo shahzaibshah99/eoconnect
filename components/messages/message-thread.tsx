@@ -39,10 +39,15 @@ export function MessageThread({
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  // Refs let the polling loop read the latest messages without re-creating
+  // the interval every render (which would reset the timer constantly).
+  const messagesRef = useRef<Message[]>(initialMessages)
+  useEffect(() => { messagesRef.current = messages }, [messages])
 
   // Reset state when active conversation changes
   useEffect(() => {
     setMessages(initialMessages)
+    messagesRef.current = initialMessages
   }, [conversationId, initialMessages])
 
   // Scroll to bottom on new messages
@@ -50,21 +55,77 @@ export function MessageThread({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages])
 
-  // Realtime subscription
+  // Live message updates via two independent paths so neither single
+  // failure stalls the conversation:
+  //
+  //   1. Realtime postgres_changes — instant, but flaky in some networks
+  //      (corporate firewalls blocking WebSockets, Supabase realtime
+  //      service blips, project not on the realtime publication, etc.)
+  //
+  //   2. Polling every 5 seconds — reliable fallback. One small SELECT
+  //      per active conversation; cheap. Also runs immediately when the
+  //      tab regains focus so quickly switching tabs doesn't leave you
+  //      with stale state.
+  //
+  // Both paths feed setMessages with dedup-by-id so duplicates never
+  // appear if both fire for the same message.
   useEffect(() => {
     const supabase = createClient()
+    let cancelled = false
+
+    const merge = (incoming: Message[]) => {
+      if (cancelled) return
+      setMessages(prev => {
+        const seen = new Set(prev.map(m => m.id))
+        const additions = incoming.filter(m => !seen.has(m.id))
+        return additions.length === 0 ? prev : [...prev, ...additions]
+      })
+    }
+
+    // Path 1: realtime
     const channel = supabase
       .channel(`messages:${conversationId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
-        (payload) => {
-          const msg = payload.new as Message
-          setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg])
-        }
+        (payload) => merge([payload.new as Message])
       )
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[chat] realtime subscribed')
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.warn('[chat] realtime status:', status, err)
+        }
+      })
+
+    // Path 2: polling — safety net if realtime is silent.
+    const fetchSinceLast = async () => {
+      const lastTs = messagesRef.current.length > 0
+        ? messagesRef.current[messagesRef.current.length - 1].created_at
+        : new Date(0).toISOString()
+      const { data, error: fetchErr } = await supabase
+        .from('messages')
+        .select('id, sender_id, body, created_at')
+        .eq('conversation_id', conversationId)
+        .gt('created_at', lastTs)
+        .order('created_at', { ascending: true })
+      if (fetchErr) {
+        console.warn('[chat] poll error:', fetchErr.message)
+        return
+      }
+      if (data && data.length > 0) merge(data as Message[])
+    }
+
+    const interval = setInterval(fetchSinceLast, 5000)
+    const onVisible = () => { if (document.visibilityState === 'visible') fetchSinceLast() }
+    document.addEventListener('visibilitychange', onVisible)
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisible)
+      supabase.removeChannel(channel)
+    }
   }, [conversationId])
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
