@@ -68,6 +68,21 @@ export async function createService(business_id: string, formData: FormData): Pr
 
   if (!parsed.success) return { error: parsed.error.issues[0].message }
 
+  // Block duplicate titles under the same business. The DB has a partial
+  // unique index (migration 013) that's the real backstop against races,
+  // but checking up-front lets us surface a friendlier error than the raw
+  // "duplicate key value violates unique constraint" message.
+  const normalizedTitle = parsed.data.title.trim().toLowerCase()
+  const { data: existing } = await db
+    .from('services')
+    .select('id')
+    .eq('business_id', business_id)
+    .ilike('title', normalizedTitle)
+    .limit(1) as { data: Array<{ id: string }> | null }
+  if (existing && existing.length > 0) {
+    return { error: 'A service with this title already exists for this business.' }
+  }
+
   let thumbnail_url: string | undefined
   try {
     thumbnail_url = await uploadThumbnailIfPresent(formData, user.id)
@@ -79,9 +94,18 @@ export async function createService(business_id: string, formData: FormData): Pr
     .from('services')
     .insert({ ...parsed.data, business_id, thumbnail_url, status: 'published' })
     .select('id')
-    .single()
+    .single() as { data: { id: string } | null; error: { code?: string; message: string } | null }
 
-  if (error) return { error: error.message }
+  if (error) {
+    // 23505 = Postgres unique_violation. Catch the race that slipped past
+    // the pre-check (two concurrent inserts) and translate it back into
+    // the same friendly message.
+    if (error.code === '23505') {
+      return { error: 'A service with this title already exists for this business.' }
+    }
+    return { error: error.message }
+  }
+  if (!data) return { error: 'Failed to create service' }
   void refreshBusinessEmbedding(db, business_id)
   revalidatePath('/dashboard/services')
   revalidatePath(`/marketplace/${business_id}`)
@@ -116,6 +140,20 @@ export async function updateService(id: string, formData: FormData): Promise<Ser
 
   if (!parsed.success) return { error: parsed.error.issues[0].message }
 
+  // Same duplicate-title guard as createService, but excluding the row
+  // we're updating (otherwise saving an unchanged title would always fail).
+  const normalizedTitle = parsed.data.title.trim().toLowerCase()
+  const { data: clash } = await db
+    .from('services')
+    .select('id')
+    .eq('business_id', service.business_id)
+    .ilike('title', normalizedTitle)
+    .neq('id', id)
+    .limit(1) as { data: Array<{ id: string }> | null }
+  if (clash && clash.length > 0) {
+    return { error: 'A service with this title already exists for this business.' }
+  }
+
   const updateData: Record<string, unknown> = { ...parsed.data }
   try {
     const thumbnail_url = await uploadThumbnailIfPresent(formData, user.id)
@@ -124,8 +162,16 @@ export async function updateService(id: string, formData: FormData): Promise<Ser
     return { error: err instanceof Error ? err.message : 'Thumbnail upload failed' }
   }
 
-  const { error } = await db.from('services').update(updateData).eq('id', id)
-  if (error) return { error: error.message }
+  const { error } = await db
+    .from('services')
+    .update(updateData)
+    .eq('id', id) as { error: { code?: string; message: string } | null }
+  if (error) {
+    if (error.code === '23505') {
+      return { error: 'A service with this title already exists for this business.' }
+    }
+    return { error: error.message }
+  }
 
   void refreshBusinessEmbedding(db, service.business_id)
   revalidatePath('/dashboard/services')
