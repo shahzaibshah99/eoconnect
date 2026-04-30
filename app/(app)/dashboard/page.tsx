@@ -3,7 +3,8 @@ import Link from 'next/link'
 import { buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import { Eye, Search, MessageCircle, LayoutList, Inbox, Megaphone, UserCog, Building2, Layers, Plus } from 'lucide-react'
+import { Eye, Search, MessageCircle, LayoutList, Inbox, Megaphone, UserCog, Building2, Layers, Plus, MessageSquare } from 'lucide-react'
+import { formatDistanceToNow } from 'date-fns'
 import { ADS_ENABLED } from '@/lib/feature-flags'
 import { StatsCard } from '@/components/dashboard/stats-card'
 import { AnalyticsChart } from '@/components/dashboard/analytics-chart'
@@ -40,27 +41,46 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     ?? allBusinesses[0]
     ?? null
 
-  // Fetch conversations where user is a participant
+  // Fetch conversations where user is a participant. We pull the listing
+  // owner_id alongside the name so we can split conversations into:
+  //   - customer-side  → user is NOT the owner (they sent the inquiry)
+  //   - provider-side  → user IS the owner (incoming inquiry on their listing)
+  // Without this split, every conversation lands in "As a customer" — even
+  // ones where the user is actually responding to inquiries on their own
+  // business, which was confusing.
   const { data: conversations } = await db
     .from('conversations')
     .select('id, listing_id, last_message_at')
     .contains('participant_ids', [user.id])
     .order('last_message_at', { ascending: false })
-    .limit(10) as { data: Array<{ id: string; listing_id: string | null; last_message_at: string }> | null }
+    .limit(20) as { data: Array<{ id: string; listing_id: string | null; last_message_at: string }> | null }
 
   const conversationsWithNames = await Promise.all(
     (conversations ?? []).map(async (conv) => {
-      if (!conv.listing_id) return { ...conv, businessName: undefined }
+      if (!conv.listing_id) {
+        return { ...conv, businessName: undefined as string | undefined, ownerId: null as string | null }
+      }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: biz } = await (db as any).from('businesses').select('name').eq('id', conv.listing_id).maybeSingle() as { data: { name: string } | null }
-      return { ...conv, businessName: biz?.name }
+      const { data: biz } = await (db as any)
+        .from('businesses')
+        .select('name, owner_id')
+        .eq('id', conv.listing_id)
+        .maybeSingle() as { data: { name: string; owner_id: string } | null }
+      return { ...conv, businessName: biz?.name, ownerId: biz?.owner_id ?? null }
     })
   )
 
+  // Split by user's role in each conversation. Provider bucket = listings
+  // they own; customer bucket = everything else (inquiries they sent).
+  const providerConversations = conversationsWithNames.filter(c => c.ownerId === user.id)
+  const customerConversations = conversationsWithNames.filter(c => c.ownerId !== user.id)
+
   if (!business) {
+    // No business yet — user is purely on the customer side. Their
+    // outbound inquiries are the only conversations to show.
     return (
       <div className="space-y-6">
-        <CustomerView conversations={conversationsWithNames} />
+        <CustomerView conversations={customerConversations} />
         <div className="bg-card border border-border rounded-2xl p-8 text-center">
           <h2 className="text-2xl font-bold mb-2">Set up your business profile</h2>
           <p className="text-muted-foreground mb-6">Create your listing to appear in the Member Market marketplace.</p>
@@ -162,6 +182,39 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         )}
       </div>
 
+      {/* Inquiries received — conversations on listings the user owns.
+          Previously these dumped into the "As a customer" tab regardless,
+          which made no sense for the provider. */}
+      {providerConversations.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold">Recent Inquiries</h2>
+          <div className="flex flex-col gap-3">
+            {providerConversations.slice(0, 5).map(conv => (
+              <div
+                key={conv.id}
+                className="flex items-center justify-between gap-4 bg-card border border-border rounded-xl p-4"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <MessageSquare className="w-5 h-5 text-muted-foreground shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-medium truncate">{conv.businessName ?? 'Your listing'}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: true })}
+                    </p>
+                  </div>
+                </div>
+                <Link
+                  href={`/dashboard/messages?conversation=${conv.id}`}
+                  className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'shrink-0')}
+                >
+                  Reply
+                </Link>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Analytics — secondary, below the fold */}
       <section className="space-y-4 pt-4 border-t border-border">
         <div className="flex items-center justify-between">
@@ -183,7 +236,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   return (
     <DashboardViewToggle
       providerContent={providerView}
-      customerContent={<CustomerView conversations={conversationsWithNames} />}
+      customerContent={<CustomerView conversations={customerConversations} />}
     />
   )
 }
