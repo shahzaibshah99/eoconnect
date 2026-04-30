@@ -1,8 +1,11 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { formatDistanceToNow } from 'date-fns'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 
 export interface ConversationListItem {
@@ -23,6 +26,36 @@ export function ConversationList({
   conversations: ConversationListItem[]
   activeId: string | null
 }) {
+  const router = useRouter()
+  // Throttle router.refresh() — realtime can fire several inserts in
+  // quick succession (e.g. someone pasting a few quick replies) and
+  // each refresh is a full RSC round-trip. 1500ms is fast enough that
+  // a new conversation appears within a couple seconds, slow enough
+  // that a flurry of inserts doesn't hammer the server.
+  const lastRefreshRef = useRef(0)
+
+  useEffect(() => {
+    const supabase = createClient()
+    // We rely on the messages-select RLS policy to filter the broadcast
+    // to only conversations the current user participates in. The
+    // server-rendered conversation list above is already scoped that
+    // way; this realtime channel just mirrors the same access pattern.
+    const channel = supabase
+      .channel('inbox-refresh')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        () => {
+          const now = Date.now()
+          if (now - lastRefreshRef.current < 1500) return
+          lastRefreshRef.current = now
+          router.refresh()
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [router])
+
   if (conversations.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center p-6 text-center text-sm text-muted-foreground">

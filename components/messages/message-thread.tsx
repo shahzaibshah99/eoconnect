@@ -9,6 +9,7 @@ import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { sendMessage } from '@/actions/messages'
 import { createClient } from '@/lib/supabase/client'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
 interface Message {
   id: string
@@ -38,7 +39,18 @@ export function MessageThread({
   const [body, setBody] = useState('')
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
+  const [otherIsTyping, setOtherIsTyping] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  // Realtime channel ref so the form submit handler can broadcast a
+  // "typing" event on the same channel the receive effect subscribes to.
+  // Stored in a ref because the channel is created inside the
+  // conversationId-keyed useEffect — capturing it in component-level
+  // state would force a re-render every time we (re)subscribe.
+  const channelRef = useRef<RealtimeChannel | null>(null)
+  // Throttle outbound typing broadcasts so a fast typer doesn't spam
+  // the channel with one event per keystroke.
+  const lastTypingSentRef = useRef(0)
+  const typingClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Refs let the polling loop read the latest messages without re-creating
   // the interval every render (which would reset the timer constantly).
   const messagesRef = useRef<Message[]>(initialMessages)
@@ -91,14 +103,30 @@ export function MessageThread({
       })
     }
 
-    // Path 1: realtime
+    // Path 1: realtime — INSERTs for new messages plus a "typing"
+    // broadcast event for the typing indicator. Typing uses broadcast
+    // (not postgres_changes) because it's ephemeral and doesn't need
+    // to round-trip through the DB.
     const channel = supabase
-      .channel(`messages:${conversationId}`)
+      .channel(`messages:${conversationId}`, {
+        config: { broadcast: { self: false } },
+      })
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
         (payload) => merge([payload.new as Message])
       )
+      .on('broadcast', { event: 'typing' }, (payload) => {
+        const senderId = (payload.payload as { sender_id?: string } | undefined)?.sender_id
+        if (!senderId || senderId === currentUserId) return
+        if (cancelled) return
+        setOtherIsTyping(true)
+        // Auto-clear after 3s with no further typing events. Clearing on
+        // each new event keeps the indicator alive while the other party
+        // is actively typing.
+        if (typingClearTimeoutRef.current) clearTimeout(typingClearTimeoutRef.current)
+        typingClearTimeoutRef.current = setTimeout(() => setOtherIsTyping(false), 3000)
+      })
       .subscribe((status, err) => {
         if (status === 'SUBSCRIBED') {
           console.log('[chat] realtime subscribed')
@@ -106,6 +134,7 @@ export function MessageThread({
           console.warn('[chat] realtime status:', status, err)
         }
       })
+    channelRef.current = channel
 
     // Path 2: polling — safety net if realtime is silent.
     const fetchSinceLast = async () => {
@@ -146,8 +175,33 @@ export function MessageThread({
       clearInterval(interval)
       document.removeEventListener('visibilitychange', onVisible)
       supabase.removeChannel(channel)
+      channelRef.current = null
+      if (typingClearTimeoutRef.current) {
+        clearTimeout(typingClearTimeoutRef.current)
+        typingClearTimeoutRef.current = null
+      }
+      // Always clear the indicator on teardown — otherwise switching
+      // conversations could leave the previous "typing…" hanging.
+      setOtherIsTyping(false)
     }
-  }, [conversationId])
+  }, [conversationId, currentUserId])
+
+  // Broadcast that the current user is typing. Throttled to one event
+  // per 1.5s — sufficient to keep the receiver's 3s auto-clear timer
+  // refreshed, light enough that a 60-wpm typist doesn't push 60+
+  // events per minute through the channel.
+  const broadcastTyping = () => {
+    const channel = channelRef.current
+    if (!channel) return
+    const now = Date.now()
+    if (now - lastTypingSentRef.current < 1500) return
+    lastTypingSentRef.current = now
+    void channel.send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: { sender_id: currentUserId },
+    })
+  }
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -183,7 +237,7 @@ export function MessageThread({
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.length === 0 ? (
+        {messages.length === 0 && !otherIsTyping ? (
           <p className="text-center text-sm text-muted-foreground py-10">
             No messages yet. Say hello!
           </p>
@@ -207,6 +261,16 @@ export function MessageThread({
             )
           })
         )}
+        {otherIsTyping && (
+          <div className="flex justify-start" aria-live="polite">
+            <div className="bg-muted rounded-2xl px-4 py-2 flex items-center gap-1">
+              <span className="sr-only">{otherName} is typing</span>
+              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
+          </div>
+        )}
       </div>
 
       {error && (
@@ -218,7 +282,10 @@ export function MessageThread({
       <form onSubmit={handleSubmit} className="p-3 border-t border-border flex gap-2">
         <Input
           value={body}
-          onChange={e => setBody(e.target.value)}
+          onChange={e => {
+            setBody(e.target.value)
+            if (e.target.value.length > 0) broadcastTyping()
+          }}
           placeholder="Type a message…"
           disabled={isPending}
           className="flex-1"
