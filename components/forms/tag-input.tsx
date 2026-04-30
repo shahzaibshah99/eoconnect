@@ -97,14 +97,19 @@ export function TagInput({
       {tags.map((tag, i) => (
         <span
           key={`${tag}-${i}`}
-          className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary rounded-md text-xs font-medium"
+          // Solid primary pill (was bg-primary/10 + text-primary). Same
+          // contrast bug as the destructive button: at 10% opacity over
+          // the form's cream surface the pill rendered as a near-solid
+          // green that swallowed the equally-green label on some mobile
+          // browsers. Solid primary + primary-foreground is unambiguous.
+          className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary text-primary-foreground rounded-md text-xs font-medium"
         >
           {tag}
           <button
             type="button"
             aria-label={`Remove ${tag}`}
             onClick={(e) => { e.stopPropagation(); remove(i) }}
-            className="hover:text-destructive"
+            className="hover:text-white/80"
           >
             <X className="h-3 w-3" />
           </button>

@@ -73,8 +73,13 @@ export function AccountForm({ chapters, currentAvatar, defaultName, defaultChapt
     <form onSubmit={handleSubmit} className="bg-card border border-border rounded-2xl p-6 space-y-5">
       {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
       {success && (
-        <Alert className="border-primary/50 bg-primary/10">
-          <AlertDescription className="text-primary font-medium">Profile updated.</AlertDescription>
+        // bg-primary/10 + text-primary collapsed into a single green
+        // block on mobile (same contrast bug Anam flagged on the tag
+        // pill and Delete button). Use foreground text on the tinted
+        // card so the confirmation is always legible regardless of
+        // how the browser composites the translucent green.
+        <Alert className="border-primary/50 bg-primary/10 text-foreground">
+          <AlertDescription className="text-foreground font-medium">Profile updated.</AlertDescription>
         </Alert>
       )}
 

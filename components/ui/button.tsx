@@ -15,8 +15,14 @@ const buttonVariants = cva(
           "bg-secondary text-secondary-foreground hover:bg-secondary/80 aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
+        // Solid destructive for unambiguous "delete / dangerous" action
+        // visibility. The previous bg-destructive/10 + text-destructive
+        // combo could fail on some mobile rendering paths where 10%
+        // opacity over the off-white card came out close enough to the
+        // full destructive colour that the label disappeared into the
+        // background (Anam, mobile QA on Manage Services).
         destructive:
-          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
+          "bg-destructive text-white hover:bg-destructive/90 focus-visible:border-destructive/40 focus-visible:ring-destructive/30 dark:bg-destructive dark:hover:bg-destructive/90 dark:text-white",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
