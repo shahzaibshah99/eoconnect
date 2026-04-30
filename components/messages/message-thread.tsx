@@ -33,10 +33,9 @@ interface MessageThreadProps {
   currentUserId: string
   otherName: string
   otherAvatar: string | null
+  /** The LISTING this conversation is about. For buyer-side this is
+   *  the row primary; for seller-side this is the "About: X" tag. */
   businessName: string | null
-  /** Business id so the header can link the business name into the
-   *  listing. Null when the listing was deleted (header falls back
-   *  to the person-only display in that case). */
   businessId?: string | null
   businessLogo?: string | null
   /** Service the inquiry was originally about, if structurally known
@@ -46,6 +45,12 @@ interface MessageThreadProps {
    *  the You inquired / They inquired pill. Null for orphaned
    *  conversations where role can't be determined. */
   role?: 'buyer' | 'seller' | null
+  /** The INQUIRER's representative business — populated only when
+   *  the current user is the seller. Lets the header lead with the
+   *  inquirer's identity instead of the seller's own business. */
+  inquirerBusinessId?: string | null
+  inquirerBusinessName?: string | null
+  inquirerBusinessLogo?: string | null
   initialMessages: Message[]
 }
 
@@ -59,6 +64,9 @@ export function MessageThread({
   businessLogo = null,
   serviceTitle = null,
   role = null,
+  inquirerBusinessId = null,
+  inquirerBusinessName = null,
+  inquirerBusinessLogo = null,
   initialMessages,
 }: MessageThreadProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages)
@@ -295,48 +303,72 @@ export function MessageThread({
   return (
     <>
       <div className="p-4 border-b border-border flex items-center gap-3">
-        <Avatar className="h-9 w-9">
-          <AvatarImage src={businessLogo ?? otherAvatar ?? undefined} />
-          <AvatarFallback className="bg-primary/15 text-primary text-sm font-bold">
-            {(businessName ?? otherName).charAt(0).toUpperCase()}
-          </AvatarFallback>
-        </Avatar>
-        <div className="min-w-0 flex-1">
-          {/* Business name is the primary heading, linkable into the
-              listing in a new tab so the chat stays open. Falls back
-              to the person's name for deleted listings. */}
-          <div className="flex items-center gap-1.5 min-w-0">
-            {businessId && businessName ? (
-              <a
-                href={`/marketplace/${businessId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-semibold text-sm truncate hover:underline inline-flex items-center gap-1"
-                title={`Open ${businessName} listing`}
-              >
-                <span className="truncate">{businessName}</span>
-                <ExternalLink className="h-3 w-3 text-muted-foreground" />
-              </a>
-            ) : (
-              <p className="font-semibold text-sm truncate">{businessName ?? otherName}</p>
-            )}
-            {role && (
-              role === 'buyer' ? (
-                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary text-primary-foreground flex-shrink-0">
-                  You inquired
-                </span>
-              ) : (
-                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-secondary text-secondary-foreground flex-shrink-0">
-                  They inquired
-                </span>
-              )
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground truncate">
-            with {otherName}
-            {serviceTitle && <> · Re: <span className="text-foreground/80">{serviceTitle}</span></>}
-          </p>
-        </div>
+        {/* Header mirrors the conversation-list row asymmetry:
+              Buyer  → listing's business is the primary heading
+              Seller → INQUIRER's business (or profile) is primary;
+                       seller's own listing surfaces in the
+                       "About: …" subtitle so they know which of
+                       their listings this thread is about. */}
+        {(() => {
+          const isSeller = role === 'seller'
+          const primaryName = isSeller
+            ? (inquirerBusinessName ?? otherName)
+            : (businessName ?? otherName)
+          const primaryLogo = isSeller
+            ? (inquirerBusinessLogo ?? otherAvatar)
+            : (businessLogo ?? otherAvatar)
+          const primaryHref = isSeller
+            ? (inquirerBusinessId ? `/marketplace/${inquirerBusinessId}` : null)
+            : (businessId ? `/marketplace/${businessId}` : null)
+          return (
+            <>
+              <Avatar className="h-9 w-9">
+                <AvatarImage src={primaryLogo ?? undefined} />
+                <AvatarFallback className="bg-primary/15 text-primary text-sm font-bold">
+                  {primaryName.charAt(0).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  {primaryHref ? (
+                    <a
+                      href={primaryHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-sm truncate hover:underline inline-flex items-center gap-1"
+                      title={`Open ${primaryName}`}
+                    >
+                      <span className="truncate">{primaryName}</span>
+                      <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                    </a>
+                  ) : (
+                    <p className="font-semibold text-sm truncate">{primaryName}</p>
+                  )}
+                  {role && (
+                    role === 'buyer' ? (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary text-primary-foreground flex-shrink-0">
+                        You inquired
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-secondary text-secondary-foreground flex-shrink-0">
+                        They inquired
+                      </span>
+                    )
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground truncate">
+                  with {otherName}
+                  {isSeller && businessName && (
+                    <> · About: <span className="text-foreground/80">{businessName}</span></>
+                  )}
+                  {serviceTitle && (
+                    <> · Re: <span className="text-foreground/80">{serviceTitle}</span></>
+                  )}
+                </p>
+              </div>
+            </>
+          )
+        })()}
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
