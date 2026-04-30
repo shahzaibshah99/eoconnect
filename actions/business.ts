@@ -9,8 +9,18 @@ import { z } from 'zod'
 import { PORTFOLIO_MAX_TOTAL_BYTES, formatBytes } from '@/lib/portfolio-limits'
 import { normalizeWebsite } from '@/lib/normalize-website'
 
-const DUPLICATE_WEBSITE_MESSAGE =
+// Two distinct duplicate-website errors so the UI can guide the user
+// to the right next step:
+//   - SAME owner: edit the existing listing instead of duplicating.
+//   - DIFFERENT owner: another member already claimed this URL; if
+//     they believe the existing claim is wrong, they need to talk to
+//     the EO team rather than retry. Andrew + Shahzaib + team
+//     escalated this from "moderation queue" to "hard block" so as
+//     not to ship an admin-review queue at launch.
+const DUPLICATE_WEBSITE_MESSAGE_OWN =
   'You already have a business with this website. Edit the existing one or use a different URL.'
+const DUPLICATE_WEBSITE_MESSAGE_OTHER =
+  'Another member has already listed this website. If you believe this is in error, please reach out to the EO team.'
 
 /**
  * Sums HEAD-fetched Content-Length for a list of public Supabase Storage URLs.
@@ -93,21 +103,25 @@ export async function createBusiness(formData: FormData): Promise<BusinessAction
   const parsed = BusinessSchema.safeParse(raw)
   if (!parsed.success) return { error: parsed.error.issues[0].message }
 
-  // Block this owner from creating a second business with the same
-  // website. Andrew + Shahzaib settled on (owner_id, website) as the
-  // qualifying criteria — names alone are too generic to be a unique
-  // signal. Migration 016's partial unique index is the real backstop;
-  // this pre-check just gives a friendlier error than the raw 23505.
+  // Global duplicate-website block. First member to list a URL wins;
+  // anyone else gets a friendly error pointing them at the EO team.
+  // Migration 018's partial unique index is the real backstop against
+  // races; this pre-check exists to surface the *right* error message
+  // (own-listing vs other-member) instead of the raw 23505.
   const normalizedWebsite = normalizeWebsite(parsed.data.website)
   if (normalizedWebsite) {
     const { data: existingDup } = await db
       .from('businesses')
-      .select('id')
-      .eq('owner_id', user.id)
+      .select('id, owner_id')
       .eq('website_normalized', normalizedWebsite)
-      .limit(1) as { data: Array<{ id: string }> | null }
+      .limit(1) as { data: Array<{ id: string; owner_id: string }> | null }
     if (existingDup && existingDup.length > 0) {
-      return { error: DUPLICATE_WEBSITE_MESSAGE }
+      const isOwnListing = existingDup[0].owner_id === user.id
+      return {
+        error: isOwnListing
+          ? DUPLICATE_WEBSITE_MESSAGE_OWN
+          : DUPLICATE_WEBSITE_MESSAGE_OTHER,
+      }
     }
   }
 
@@ -188,11 +202,23 @@ export async function createBusiness(formData: FormData): Promise<BusinessAction
       .single() as { data: { id: string } | null; error: { code?: string; message: string } | null }
 
     if (error) {
-      // 23505 = Postgres unique_violation. Catch the race that beat the
-      // pre-check (two concurrent inserts with the same website under
-      // the same owner) and surface the same friendly error.
-      if (error.code === '23505') {
-        return { error: DUPLICATE_WEBSITE_MESSAGE }
+      // 23505 = Postgres unique_violation. Catch the race that beat
+      // the pre-check (two concurrent inserts with the same website).
+      // We don't know from the error alone whether the existing row
+      // belongs to the same user or a different one, so we re-check
+      // here to surface the right friendly message.
+      if (error.code === '23505' && normalizedWebsite) {
+        const { data: claimant } = await db
+          .from('businesses')
+          .select('owner_id')
+          .eq('website_normalized', normalizedWebsite)
+          .limit(1) as { data: Array<{ owner_id: string }> | null }
+        const isOwnListing = !!claimant && claimant.length > 0 && claimant[0].owner_id === user.id
+        return {
+          error: isOwnListing
+            ? DUPLICATE_WEBSITE_MESSAGE_OWN
+            : DUPLICATE_WEBSITE_MESSAGE_OTHER,
+        }
       }
       return { error: error.message }
     }
@@ -261,21 +287,24 @@ export async function updateBusiness(id: string, formData: FormData): Promise<Bu
   const parsed = BusinessSchema.safeParse(raw)
   if (!parsed.success) return { error: parsed.error.issues[0].message }
 
-  // Same duplicate-website guard as createBusiness, but excluding the
-  // row being updated (otherwise saving without changing the URL would
-  // always fail). Scoped to existing.owner_id so admin edits don't
-  // accidentally false-match against the admin's own businesses.
+  // Same global duplicate-website guard as createBusiness, but excluding
+  // the row being updated (otherwise saving without changing the URL
+  // would always fail).
   const normalizedWebsite = normalizeWebsite(parsed.data.website)
   if (normalizedWebsite) {
     const { data: clash } = await db
       .from('businesses')
-      .select('id')
-      .eq('owner_id', existing.owner_id)
+      .select('id, owner_id')
       .eq('website_normalized', normalizedWebsite)
       .neq('id', id)
-      .limit(1) as { data: Array<{ id: string }> | null }
+      .limit(1) as { data: Array<{ id: string; owner_id: string }> | null }
     if (clash && clash.length > 0) {
-      return { error: DUPLICATE_WEBSITE_MESSAGE }
+      const isOwnListing = clash[0].owner_id === existing.owner_id
+      return {
+        error: isOwnListing
+          ? DUPLICATE_WEBSITE_MESSAGE_OWN
+          : DUPLICATE_WEBSITE_MESSAGE_OTHER,
+      }
     }
   }
 
@@ -340,8 +369,22 @@ export async function updateBusiness(id: string, formData: FormData): Promise<Bu
       .eq('id', id)
       .eq('owner_id', existing.owner_id) as { error: { code?: string; message: string } | null }
     if (error) {
-      if (error.code === '23505') {
-        return { error: DUPLICATE_WEBSITE_MESSAGE }
+      // Same race-loser handling as createBusiness — re-look-up the
+      // colliding owner so we can return the right friendly message.
+      if (error.code === '23505' && normalizedWebsite) {
+        const { data: claimant } = await db
+          .from('businesses')
+          .select('owner_id')
+          .eq('website_normalized', normalizedWebsite)
+          .neq('id', id)
+          .limit(1) as { data: Array<{ owner_id: string }> | null }
+        const isOwnListing =
+          !!claimant && claimant.length > 0 && claimant[0].owner_id === existing.owner_id
+        return {
+          error: isOwnListing
+            ? DUPLICATE_WEBSITE_MESSAGE_OWN
+            : DUPLICATE_WEBSITE_MESSAGE_OTHER,
+        }
       }
       return { error: error.message }
     }
