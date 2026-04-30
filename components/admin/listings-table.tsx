@@ -6,6 +6,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { setBusinessStatusAdmin } from '@/actions/admin'
+import { AdminDeleteListingButton } from '@/components/admin/delete-listing-button'
 import { TransferListingButton } from '@/components/admin/transfer-listing-button'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
@@ -147,6 +148,7 @@ function ListingRow({ listing, isSuperAdmin }: { listing: AdminListing; isSuperA
               currentOwnerName={owner?.full_name ?? null}
             />
           )}
+          <AdminDeleteListingButton businessId={listing.id} businessName={listing.name} />
         </div>
       </td>
     </tr>

@@ -295,6 +295,53 @@ export async function updateBusiness(id: string, formData: FormData): Promise<Bu
   }
 }
 
+/**
+ * Permanently delete a business owned by the caller.
+ *
+ * On delete, schema-level ON DELETE CASCADE rules clean up:
+ *   - services
+ *   - listing_analytics
+ *   - reviews
+ *   - ad_campaigns
+ * `conversations.listing_id` is set null so past message threads survive.
+ *
+ * Caller must pass the business's exact name as `confirmName` to guard
+ * against accidental deletes — the dashboard form requires the user to
+ * type it before submit.
+ */
+export async function deleteBusiness(
+  id: string,
+  confirmName: string
+): Promise<BusinessActionResult> {
+  const supabase = await createClient()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = supabase as any
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+
+  // Load the row first to verify ownership AND match the typed name.
+  const { data: biz } = await db
+    .from('businesses')
+    .select('id, name, owner_id')
+    .eq('id', id)
+    .maybeSingle() as { data: { id: string; name: string; owner_id: string } | null }
+
+  if (!biz) return { error: 'Business not found' }
+  if (biz.owner_id !== user.id) return { error: 'Not authorized to delete this business' }
+  if (biz.name.trim().toLowerCase() !== confirmName.trim().toLowerCase()) {
+    return { error: `Type the business name exactly to confirm: "${biz.name}"` }
+  }
+
+  const { error } = await db.from('businesses').delete().eq('id', id).eq('owner_id', user.id)
+  if (error) return { error: error.message }
+
+  revalidatePath('/dashboard')
+  revalidatePath('/dashboard/services')
+  revalidatePath('/dashboard/business/edit')
+  revalidatePath('/marketplace')
+  return { error: null }
+}
+
 export async function updateBusinessStatus(
   id: string,
   status: 'draft' | 'published' | 'paused'

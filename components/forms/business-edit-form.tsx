@@ -2,6 +2,7 @@
 
 import { useState, useTransition, useRef } from 'react'
 import { updateBusiness, type BusinessActionResult } from '@/actions/business'
+import { DeleteBusinessButton } from '@/components/forms/delete-business-button'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -454,6 +455,22 @@ export function BusinessEditForm({ business, categories }: BusinessEditFormProps
       <Button type="submit" disabled={isPending} className="w-full bg-primary text-primary-foreground font-bold py-3">
         {isPending ? 'Saving…' : 'Save Changes'}
       </Button>
+
+      {/* Danger zone — owner-only delete. Lives at the bottom of the edit
+          form because a destructive action belongs furthest from any
+          casual click. Opens a confirmation modal that requires typing
+          the business name to enable the delete button. */}
+      <div className="mt-12 border-2 border-destructive/40 rounded-xl p-5 space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold text-destructive">Danger zone</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Permanently delete this business and everything tied to it: services,
+            portfolio documents, reviews, analytics, and any active ad campaigns.
+            Conversations are kept but will no longer reference this listing.
+          </p>
+        </div>
+        <DeleteBusinessButton businessId={business.id} businessName={business.name ?? ''} />
+      </div>
     </form>
   )
 }
