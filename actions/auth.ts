@@ -30,7 +30,7 @@ export async function signUp(formData: FormData): Promise<AuthResult> {
   }
 
   const supabase = await createClient()
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
     password: parsed.data.password,
     options: {
@@ -47,6 +47,20 @@ export async function signUp(formData: FormData): Promise<AuthResult> {
   })
 
   if (error) return { error: error.message }
+
+  // Detect "email already registered" without leaking via a separate
+  // check call. Supabase's anti-enumeration default is to return success
+  // with no error when the email already exists — but signals it via the
+  // returned user's `identities` array being empty. New signups always
+  // come back with at least one identity (the email/password one).
+  //
+  // We surface a real error instead of silently bouncing the user to
+  // /verify, where they'd never get a confirmation email and assume the
+  // app is broken.
+  const identities = data?.user?.identities
+  if (data?.user && (!identities || identities.length === 0)) {
+    return { error: 'An account with this email already exists. Please sign in instead.' }
+  }
 
   // Welcome email — fire-and-forget so the action returns fast. Supabase
   // sends the verification email separately through its own SMTP config.
