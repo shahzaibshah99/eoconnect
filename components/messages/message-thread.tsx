@@ -4,18 +4,28 @@ import { useEffect, useRef, useState, useTransition } from 'react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Send } from 'lucide-react'
+import { Paperclip, Send, X, FileText } from 'lucide-react'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { sendMessage } from '@/actions/messages'
 import { createClient } from '@/lib/supabase/client'
 import type { RealtimeChannel } from '@supabase/supabase-js'
+import {
+  CHAT_ATTACHMENT_MAX_BYTES,
+  formatChatAttachmentSize,
+  uploadChatAttachment,
+  validateChatAttachment,
+} from '@/lib/chat-attachments'
 
 interface Message {
   id: string
   sender_id: string
   body: string
   created_at: string
+  attachment_url?: string | null
+  attachment_name?: string | null
+  attachment_mime?: string | null
+  attachment_size?: number | null
 }
 
 interface MessageThreadProps {
@@ -40,7 +50,10 @@ export function MessageThread({
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [otherIsTyping, setOtherIsTyping] = useState(false)
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   // Realtime channel ref so the form submit handler can broadcast a
   // "typing" event on the same channel the receive effect subscribes to.
   // Stored in a ref because the channel is created inside the
@@ -154,7 +167,7 @@ export function MessageThread({
         : new Date(0).toISOString()
       const { data, error: fetchErr } = await supabase
         .from('messages')
-        .select('id, sender_id, body, created_at')
+        .select('id, sender_id, body, created_at, attachment_url, attachment_name, attachment_mime, attachment_size')
         .eq('conversation_id', conversationId)
         .gt('created_at', lastTs)
         .order('created_at', { ascending: true })
@@ -203,20 +216,62 @@ export function MessageThread({
     })
   }
 
+  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    // Reset the input value so picking the same file twice in a row
+    // (e.g. after an upload error) re-fires onChange. Without this,
+    // selecting the same file looks like nothing happened.
+    if (e.target) e.target.value = ''
+    if (!file) return
+    const validation = validateChatAttachment(file)
+    if (validation) {
+      setError(validation.message)
+      return
+    }
+    setError(null)
+    setPendingFile(file)
+  }
+
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     const text = body.trim()
-    if (!text) return
+    // Allow empty body when there's a file attached.
+    if (!text && !pendingFile) return
     setError(null)
+
+    const file = pendingFile
     setBody('')
-    const fd = new FormData()
-    fd.set('conversation_id', conversationId)
-    fd.set('body', text)
+    setPendingFile(null)
+
     startTransition(async () => {
+      const fd = new FormData()
+      fd.set('conversation_id', conversationId)
+      fd.set('body', text)
+
+      if (file) {
+        setIsUploading(true)
+        try {
+          const uploaded = await uploadChatAttachment(conversationId, file)
+          fd.set('attachment_url', uploaded.url)
+          fd.set('attachment_name', uploaded.name)
+          fd.set('attachment_mime', uploaded.mime)
+          fd.set('attachment_size', String(uploaded.size))
+        } catch (err) {
+          setIsUploading(false)
+          setError(err instanceof Error ? err.message : 'Upload failed')
+          // Restore so the user can retry without re-picking.
+          setBody(text)
+          setPendingFile(file)
+          return
+        }
+        setIsUploading(false)
+      }
+
       const result = await sendMessage(fd)
       if (result.error) {
         setError(result.error)
         setBody(text)
+        setPendingFile(file)
       }
     })
   }
@@ -244,6 +299,8 @@ export function MessageThread({
         ) : (
           messages.map(m => {
             const isMine = m.sender_id === currentUserId
+            const hasAttachment = !!m.attachment_url
+            const isImage = hasAttachment && (m.attachment_mime?.startsWith('image/') ?? false)
             return (
               <div key={m.id} className={cn('flex', isMine ? 'justify-end' : 'justify-start')}>
                 <div
@@ -252,7 +309,46 @@ export function MessageThread({
                     isMine ? 'bg-primary text-primary-foreground' : 'bg-muted'
                   )}
                 >
-                  <p className="whitespace-pre-wrap">{m.body}</p>
+                  {hasAttachment && isImage && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <a
+                      href={m.attachment_url!}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block mb-1.5 -mx-1.5 -mt-1"
+                    >
+                      <img
+                        src={m.attachment_url!}
+                        alt={m.attachment_name ?? 'attachment'}
+                        className="rounded-lg max-h-60 object-cover w-full"
+                      />
+                    </a>
+                  )}
+                  {hasAttachment && !isImage && (
+                    <a
+                      href={m.attachment_url!}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      download={m.attachment_name ?? undefined}
+                      className={cn(
+                        'flex items-center gap-2 rounded-lg px-3 py-2 mb-1.5 transition-colors',
+                        isMine
+                          ? 'bg-primary-foreground/10 hover:bg-primary-foreground/20'
+                          : 'bg-background hover:bg-background/80 border border-border'
+                      )}
+                    >
+                      <FileText className="h-5 w-5 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-xs truncate">{m.attachment_name ?? 'File'}</p>
+                        {typeof m.attachment_size === 'number' && (
+                          <p className={cn('text-[10px]', isMine ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
+                            {formatChatAttachmentSize(m.attachment_size)}
+                          </p>
+                        )}
+                      </div>
+                    </a>
+                  )}
+                  {m.body && <p className="whitespace-pre-wrap">{m.body}</p>}
                   <p className={cn('text-[10px] mt-1', isMine ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
                     {format(new Date(m.created_at), 'MMM d, h:mm a')}
                   </p>
@@ -279,20 +375,68 @@ export function MessageThread({
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="p-3 border-t border-border flex gap-2">
-        <Input
-          value={body}
-          onChange={e => {
-            setBody(e.target.value)
-            if (e.target.value.length > 0) broadcastTyping()
-          }}
-          placeholder="Type a message…"
-          disabled={isPending}
-          className="flex-1"
-        />
-        <Button type="submit" disabled={isPending || !body.trim()} size="icon" className="bg-primary text-primary-foreground">
-          <Send className="h-4 w-4" />
-        </Button>
+      <form onSubmit={handleSubmit} className="p-3 border-t border-border flex flex-col gap-2">
+        {pendingFile && (
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-xs">
+            <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <p className="font-medium truncate">{pendingFile.name}</p>
+              <p className="text-muted-foreground">
+                {formatChatAttachmentSize(pendingFile.size)}
+                {isUploading && ' · uploading…'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPendingFile(null)}
+              disabled={isUploading || isPending}
+              className="text-muted-foreground hover:text-foreground p-1 -m-1"
+              aria-label="Remove attachment"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+        <div className="flex gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            onChange={handleFilePick}
+            className="hidden"
+            // Hint to mobile pickers without restricting desktop choice
+            // — server-side validation is the real gate.
+            accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isPending || isUploading || !!pendingFile}
+            aria-label="Attach file"
+            title={`Attach a file (max ${formatChatAttachmentSize(CHAT_ATTACHMENT_MAX_BYTES)})`}
+          >
+            <Paperclip className="h-4 w-4" />
+          </Button>
+          <Input
+            value={body}
+            onChange={e => {
+              setBody(e.target.value)
+              if (e.target.value.length > 0) broadcastTyping()
+            }}
+            placeholder="Type a message…"
+            disabled={isPending}
+            className="flex-1"
+          />
+          <Button
+            type="submit"
+            disabled={isPending || isUploading || (!body.trim() && !pendingFile)}
+            size="icon"
+            className="bg-primary text-primary-foreground"
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        </div>
       </form>
     </>
   )

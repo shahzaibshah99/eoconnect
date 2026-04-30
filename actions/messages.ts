@@ -20,10 +20,29 @@ const InquirySchema = z.object({
   body: z.string().trim().min(1, 'Message is required').max(5000),
 })
 
-const MessageSchema = z.object({
-  conversation_id: z.string().uuid(),
-  body: z.string().trim().min(1, 'Message cannot be empty').max(5000),
-})
+const CHAT_ATTACHMENT_MAX_BYTES = 12 * 1024 * 1024
+
+// Body min(1) is intentionally relaxed: a message with no body but an
+// attachment is valid. The two refines below enforce that
+//   (a) at least one of body/attachment is non-empty, and
+//   (b) attachment metadata is all-or-nothing — no half-populated rows.
+const MessageSchema = z
+  .object({
+    conversation_id: z.string().uuid(),
+    body: z.string().trim().max(5000),
+    attachment_url: z.string().url().optional(),
+    attachment_name: z.string().max(255).optional(),
+    attachment_mime: z.string().max(127).optional(),
+    attachment_size: z.coerce.number().int().positive().max(CHAT_ATTACHMENT_MAX_BYTES).optional(),
+  })
+  .refine(
+    (v) => (v.body && v.body.length > 0) || !!v.attachment_url,
+    { message: 'Message cannot be empty' }
+  )
+  .refine(
+    (v) => !v.attachment_url || (!!v.attachment_name && !!v.attachment_mime && !!v.attachment_size),
+    { message: 'Attachment metadata is incomplete' }
+  )
 
 export async function sendMessage(formData: FormData): Promise<{ error: string | null }> {
   const supabase = await createClient()
@@ -32,9 +51,21 @@ export async function sendMessage(formData: FormData): Promise<{ error: string |
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Not authenticated' }
 
+  // Optional attachment fields come through as empty strings from the
+  // form when no file was picked — coerce those to undefined so the
+  // schema's optional() works as expected.
+  const attachmentUrl = (formData.get('attachment_url') as string | null) || undefined
+  const attachmentName = (formData.get('attachment_name') as string | null) || undefined
+  const attachmentMime = (formData.get('attachment_mime') as string | null) || undefined
+  const attachmentSizeRaw = (formData.get('attachment_size') as string | null) || undefined
+
   const parsed = MessageSchema.safeParse({
     conversation_id: formData.get('conversation_id'),
-    body: formData.get('body'),
+    body: formData.get('body') ?? '',
+    attachment_url: attachmentUrl,
+    attachment_name: attachmentName,
+    attachment_mime: attachmentMime,
+    attachment_size: attachmentSizeRaw,
   })
   if (!parsed.success) return { error: parsed.error.issues[0].message }
 
@@ -52,6 +83,10 @@ export async function sendMessage(formData: FormData): Promise<{ error: string |
     conversation_id: parsed.data.conversation_id,
     sender_id: user.id,
     body: parsed.data.body,
+    attachment_url: parsed.data.attachment_url ?? null,
+    attachment_name: parsed.data.attachment_name ?? null,
+    attachment_mime: parsed.data.attachment_mime ?? null,
+    attachment_size: parsed.data.attachment_size ?? null,
   })
 
   if (error) return { error: error.message }
@@ -80,7 +115,15 @@ export async function sendMessage(formData: FormData): Promise<{ error: string |
         const { data: biz } = await db.from('businesses').select('name').eq('id', convRow.listing_id).single()
         businessName = biz?.name ?? null
       }
-      const tpl = newMessageEmail(senderProfile?.full_name ?? 'Someone', businessName, parsed.data.body.slice(0, 200), siteUrl(), parsed.data.conversation_id)
+      // Attachment-only messages would email a blank preview, which
+      // looks broken. Fall back to a short "(sent an attachment: …)"
+      // line so the recipient knows there's something to look at.
+      const previewBody = parsed.data.body && parsed.data.body.length > 0
+        ? parsed.data.body.slice(0, 200)
+        : parsed.data.attachment_name
+          ? `(sent an attachment: ${parsed.data.attachment_name})`
+          : '(new message)'
+      const tpl = newMessageEmail(senderProfile?.full_name ?? 'Someone', businessName, previewBody, siteUrl(), parsed.data.conversation_id)
       const result = await sendEmail({ to: recipient.eo_membership_email, subject: tpl.subject, html: tpl.html })
       if (result.ok) {
         console.log(`[email] message notification sent to ${recipient.eo_membership_email}`)

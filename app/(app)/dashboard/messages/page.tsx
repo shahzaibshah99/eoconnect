@@ -97,13 +97,22 @@ export default async function MessagesPage({ searchParams }: MessagesPageProps) 
   })
 
   // Active conversation
-  let activeMessages: Array<{ id: string; sender_id: string; body: string; created_at: string }> = []
+  let activeMessages: Array<{
+    id: string
+    sender_id: string
+    body: string
+    created_at: string
+    attachment_url: string | null
+    attachment_name: string | null
+    attachment_mime: string | null
+    attachment_size: number | null
+  }> = []
   let activeMeta: typeof enriched[0] | null = null
   if (activeId && convList.find(c => c.id === activeId)) {
     activeMeta = enriched.find(c => c.id === activeId) ?? null
     const { data: msgs } = await db
       .from('messages')
-      .select('id, sender_id, body, created_at')
+      .select('id, sender_id, body, created_at, attachment_url, attachment_name, attachment_mime, attachment_size')
       .eq('conversation_id', activeId)
       .order('created_at', { ascending: true })
     activeMessages = (msgs ?? []) as typeof activeMessages
