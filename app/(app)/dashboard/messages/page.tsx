@@ -58,12 +58,22 @@ export default async function MessagesPage({ searchParams }: MessagesPageProps) 
   const businessIds = [...new Set(convList.map(c => c.listing_id).filter((x): x is string => !!x))]
   const serviceIds = [...new Set(convList.map(c => c.service_id).filter((x): x is string => !!x))]
 
-  // Pull profile metadata richly enough to populate the new business-
-  // first row layout: avatar (fallback if business has no logo), name,
-  // EO chapter, and membership type for the secondary line. Owner_id
-  // on the business tells us whether the current user is the buyer or
-  // the seller in each thread (drives the You inquired / They inquired
-  // pill).
+  // Pull enough metadata to populate the inbox row asymmetrically:
+  //   - For listings the current user OWNS (seller-side rows), we
+  //     show the INQUIRER's identity as the row primary — because
+  //     the user already knows it's about their own business; what
+  //     they need is "who's contacting me?". We resolve that by
+  //     pulling a representative business owned by the inquirer; if
+  //     they don't have one we fall back to their profile name.
+  //   - For listings the current user DOESN'T own (buyer-side rows),
+  //     the listing business stays as primary — that's what the user
+  //     was asking about.
+  //
+  // `inquirerBusinessesByOwner` is built only for the seller side
+  // (otherIds whose conversation flows show the current user as the
+  // listing owner). One representative business per inquirer —
+  // most-recently-created, status doesn't matter (we want to show
+  // the person's business identity even if it's a draft).
   const [{ data: profiles }, { data: businesses }, { data: services }, { data: lastMsgs }] = await Promise.all([
     otherIds.length
       ? db.from('profiles').select('id, full_name, avatar_url, eo_chapter, eo_membership_type').in('id', otherIds)
@@ -95,32 +105,78 @@ export default async function MessagesPage({ searchParams }: MessagesPageProps) 
     if (!lastMsgMap.has(m.conversation_id)) lastMsgMap.set(m.conversation_id, m)
   }
 
+  // Identify which conversations are seller-side (current user owns
+  // the listing) so we know which inquirer profiles need a business
+  // lookup. Buyer-side rows don't need it — the listing's own
+  // business is the row primary.
+  const sellerInquirerIds = new Set<string>()
+  for (const c of convList) {
+    const business = c.listing_id ? bizMap.get(c.listing_id) : undefined
+    if (business && business.owner_id === user.id) {
+      const otherId = c.participant_ids.find(id => id !== user.id)
+      if (otherId) sellerInquirerIds.add(otherId)
+    }
+  }
+
+  // Pull all businesses owned by those inquirers, then keep one per
+  // owner (most-recently-created). One round-trip; map built in JS.
+  const inquirerBusinessByOwner = new Map<string, BusinessRow>()
+  if (sellerInquirerIds.size > 0) {
+    const { data: inqBusinesses } = await db
+      .from('businesses')
+      .select('id, name, logo_url, owner_id, created_at')
+      .in('owner_id', Array.from(sellerInquirerIds))
+      .order('created_at', { ascending: false }) as {
+        data: Array<BusinessRow & { created_at: string }> | null
+      }
+    for (const b of (inqBusinesses ?? [])) {
+      // First seen wins because we ordered desc → most recent.
+      if (!inquirerBusinessByOwner.has(b.owner_id)) {
+        inquirerBusinessByOwner.set(b.owner_id, b)
+      }
+    }
+  }
+
   const enriched = convList.map(c => {
     const otherId = c.participant_ids.find(id => id !== user.id)
     const otherProfile = otherId ? profileMap.get(otherId) : undefined
     const business = c.listing_id ? bizMap.get(c.listing_id) : undefined
     const service = c.service_id ? serviceMap.get(c.service_id) : undefined
     const lastMsg = lastMsgMap.get(c.id)
-    // Buyer vs seller is derived from listing ownership: the listing
-    // owner is the seller, anyone else in the thread is the buyer
-    // ("inquired"). When the listing was deleted (no business row),
-    // we default to "you inquired" if the current user wasn't the
-    // original owner — but we only know that when the listing exists.
-    // For deleted listings the role pill is suppressed entirely (see
-    // ConversationList).
     const isCurrentUserOwner = !!business && business.owner_id === user.id
+    const role: 'buyer' | 'seller' | null = business
+      ? (isCurrentUserOwner ? 'seller' : 'buyer')
+      : null
+    const inquirerBusiness = role === 'seller' && otherId
+      ? inquirerBusinessByOwner.get(otherId)
+      : undefined
+
     return {
       id: c.id,
+      role,
+      // Buyer-side: the listing's business is the row identity.
+      // Seller-side: the INQUIRER's business is the row identity
+      // (or their profile if they don't have a business listed).
+      // Components decide rendering off `role` + the data below.
       otherName: otherProfile?.full_name ?? 'Unknown',
       otherAvatar: otherProfile?.avatar_url ?? null,
       otherChapter: otherProfile?.eo_chapter ?? null,
       otherMembershipType: otherProfile?.eo_membership_type ?? null,
-      businessId: business?.id ?? null,
-      businessName: business?.name ?? null,
-      businessLogo: business?.logo_url ?? null,
-      businessDeleted: c.listing_id !== null && !business,
+      // The listing this conversation is about. For buyer-side this
+      // is the row primary. For seller-side this is the "About: X"
+      // tag — the user knows which of *their own* businesses is
+      // being inquired on.
+      listingBusinessId: business?.id ?? null,
+      listingBusinessName: business?.name ?? null,
+      listingBusinessLogo: business?.logo_url ?? null,
+      listingDeleted: c.listing_id !== null && !business,
+      // Inquirer's representative business. Only populated for
+      // seller-side rows; null for buyer-side and for deleted
+      // listings.
+      inquirerBusinessId: inquirerBusiness?.id ?? null,
+      inquirerBusinessName: inquirerBusiness?.name ?? null,
+      inquirerBusinessLogo: inquirerBusiness?.logo_url ?? null,
       serviceTitle: service?.title ?? null,
-      role: business ? (isCurrentUserOwner ? 'seller' as const : 'buyer' as const) : null,
       lastMessageBody: lastMsg?.body ?? null,
       lastMessageAt: c.last_message_at,
       unread: lastMsg ? lastMsg.sender_id !== user.id && !lastMsg.read_at : false,
@@ -184,11 +240,14 @@ export default async function MessagesPage({ searchParams }: MessagesPageProps) 
             currentUserId={user.id}
             otherName={activeMeta.otherName}
             otherAvatar={activeMeta.otherAvatar}
-            businessName={activeMeta.businessName}
-            businessId={activeMeta.businessId}
-            businessLogo={activeMeta.businessLogo}
+            businessName={activeMeta.listingBusinessName}
+            businessId={activeMeta.listingBusinessId}
+            businessLogo={activeMeta.listingBusinessLogo}
             serviceTitle={activeMeta.serviceTitle}
             role={activeMeta.role}
+            inquirerBusinessId={activeMeta.inquirerBusinessId}
+            inquirerBusinessName={activeMeta.inquirerBusinessName}
+            inquirerBusinessLogo={activeMeta.inquirerBusinessLogo}
             initialMessages={activeMessages}
           />
         ) : (

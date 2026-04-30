@@ -17,25 +17,35 @@ const MEMBERSHIP_LABEL: Record<string, string> = {
 
 export interface ConversationListItem {
   id: string
+  /** Buyer = current user inquired on someone else's listing.
+   *  Seller = someone inquired on the current user's listing.
+   *  Null = orphaned (listing deleted, role unknown). */
+  role: 'buyer' | 'seller' | null
+
+  // The OTHER person in the conversation.
   otherName: string
   otherAvatar: string | null
   otherChapter: string | null
   otherMembershipType: 'current_member' | 'alumni' | 'accelerator' | null
-  /** Business id for the linked listing — null when the listing was
-   *  deleted (listing_id IS NULL on the conversation row). */
-  businessId: string | null
-  businessName: string | null
-  businessLogo: string | null
-  /** True when the conversation has a listing_id but the business row
-   *  no longer exists (cascade-set NULL on delete). UI shows "Deleted
-   *  listing" placeholder instead of crashing on a missing name. */
-  businessDeleted: boolean
-  /** Title of the service the inquiry was originally about, when known. */
+
+  // The listing this conversation is about.
+  // Buyer-side: this is the row primary.
+  // Seller-side: this is the "About: X" tag.
+  listingBusinessId: string | null
+  listingBusinessName: string | null
+  listingBusinessLogo: string | null
+  /** True iff the conversation has a listing_id but the business row
+   *  is gone. Row falls back to the orphaned-thread treatment. */
+  listingDeleted: boolean
+
+  // The INQUIRER's representative business. Populated only for
+  // seller-side rows so we can show their business as the row primary
+  // (instead of the seller's own business, which is redundant info).
+  inquirerBusinessId: string | null
+  inquirerBusinessName: string | null
+  inquirerBusinessLogo: string | null
+
   serviceTitle: string | null
-  /** Whether the current user is the seller (listing owner) or the
-   *  buyer (inquirer) in this thread. Null for deleted-listing threads
-   *  where we can't determine the role. */
-  role: 'buyer' | 'seller' | null
   lastMessageBody: string | null
   lastMessageAt: string
   unread: boolean
@@ -49,19 +59,10 @@ export function ConversationList({
   activeId: string | null
 }) {
   const router = useRouter()
-  // Throttle router.refresh() — realtime can fire several inserts in
-  // quick succession (e.g. someone pasting a few quick replies) and
-  // each refresh is a full RSC round-trip. 1500ms is fast enough that
-  // a new conversation appears within a couple seconds, slow enough
-  // that a flurry of inserts doesn't hammer the server.
   const lastRefreshRef = useRef(0)
 
   useEffect(() => {
     const supabase = createClient()
-    // We rely on the messages-select RLS policy to filter the broadcast
-    // to only conversations the current user participates in. The
-    // server-rendered conversation list above is already scoped that
-    // way; this realtime channel just mirrors the same access pattern.
     const channel = supabase
       .channel('inbox-refresh')
       .on(
@@ -95,12 +96,42 @@ export function ConversationList({
   )
 }
 
+/**
+ * One conversation row. Renders asymmetrically based on role:
+ *
+ *   Buyer-side (current user sent the inquiry):
+ *     primary  = listing's business (linked → listing)
+ *     about    = nothing (the listing IS the row primary)
+ *     subtitle = otherName · chapter · membership
+ *
+ *   Seller-side (someone inquired on current user's listing):
+ *     primary  = inquirer's own business (linked → their listing)
+ *                or their profile name if they don't have a business
+ *     about    = "About: <my listing>" + "Re: <my service>"
+ *     subtitle = inquirer's name · chapter · membership
+ *
+ *   Deleted listing / orphaned (role === null):
+ *     primary  = "Deleted listing" (italic, no link)
+ *     subtitle = otherName · chapter · membership
+ */
 function ConversationRow({ conv, active }: { conv: ConversationListItem; active: boolean }) {
-  // The business label is the primary affordance for opening the
-  // listing. Wrapping the whole row in <Link> would steal that click
-  // for the conversation route — so the row itself is a Link, and the
-  // business pill stops propagation and target=_blank into the listing.
-  const businessHref = conv.businessId ? `/marketplace/${conv.businessId}` : null
+  // Resolve "what's the row primary?" based on role.
+  const isSeller = conv.role === 'seller'
+  const isBuyer = conv.role === 'buyer'
+  const isOrphan = conv.role === null
+
+  // Primary identity = the OTHER side of the conversation. For seller,
+  // that's the inquirer's business (or profile fallback). For buyer,
+  // that's the listing they're asking about.
+  const primaryName = isSeller
+    ? (conv.inquirerBusinessName ?? conv.otherName)
+    : (conv.listingBusinessName ?? conv.otherName)
+  const primaryLogo = isSeller
+    ? (conv.inquirerBusinessLogo ?? conv.otherAvatar)
+    : (conv.listingBusinessLogo ?? conv.otherAvatar)
+  const primaryHref = isSeller
+    ? (conv.inquirerBusinessId ? `/marketplace/${conv.inquirerBusinessId}` : null)
+    : (conv.listingBusinessId ? `/marketplace/${conv.listingBusinessId}` : null)
 
   return (
     <Link
@@ -110,27 +141,27 @@ function ConversationRow({ conv, active }: { conv: ConversationListItem; active:
         active && 'bg-muted'
       )}
     >
-      {/* Business logo (fallback to person initial when listing was
-          deleted or the business never had a logo). */}
       <Avatar className="h-10 w-10 flex-shrink-0">
-        <AvatarImage src={conv.businessLogo ?? conv.otherAvatar ?? undefined} />
+        <AvatarImage src={primaryLogo ?? undefined} />
         <AvatarFallback className="bg-primary/15 text-primary text-sm font-bold">
-          {conv.businessDeleted
+          {isOrphan
             ? <Building2 className="h-4 w-4" />
-            : (conv.businessName?.charAt(0).toUpperCase()
-                ?? conv.otherName.charAt(0).toUpperCase())}
+            : primaryName.charAt(0).toUpperCase()}
         </AvatarFallback>
       </Avatar>
 
       <div className="flex-1 min-w-0">
-        {/* Line 1: business name (clickable into the listing) +
-            timestamp. The role pill takes line 1's right slot when
-            there's space. */}
+        {/* Line 1: primary identity (linked to listing if available)
+            and timestamp on the right. */}
         <div className="flex items-baseline justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
-            {businessHref ? (
+            {isOrphan || conv.listingDeleted ? (
+              <span className="text-sm truncate italic text-muted-foreground">
+                {conv.listingDeleted ? 'Deleted listing' : primaryName}
+              </span>
+            ) : primaryHref ? (
               <a
-                href={businessHref}
+                href={primaryHref}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={e => e.stopPropagation()}
@@ -138,17 +169,14 @@ function ConversationRow({ conv, active }: { conv: ConversationListItem; active:
                   'text-sm truncate hover:underline inline-flex items-center gap-1',
                   conv.unread ? 'font-bold' : 'font-semibold'
                 )}
-                title={`Open ${conv.businessName} listing`}
+                title={`Open ${primaryName}`}
               >
-                <span className="truncate">{conv.businessName}</span>
+                <span className="truncate">{primaryName}</span>
                 <ExternalLink className="h-3 w-3 text-muted-foreground flex-shrink-0" />
               </a>
             ) : (
-              <span className={cn(
-                'text-sm truncate',
-                conv.businessDeleted ? 'italic text-muted-foreground' : 'font-semibold'
-              )}>
-                {conv.businessDeleted ? 'Deleted listing' : (conv.businessName ?? conv.otherName)}
+              <span className={cn('text-sm truncate', conv.unread ? 'font-bold' : 'font-semibold')}>
+                {primaryName}
               </span>
             )}
           </div>
@@ -157,19 +185,31 @@ function ConversationRow({ conv, active }: { conv: ConversationListItem; active:
           </span>
         </div>
 
-        {/* Line 2: role pill + service. Both optional. */}
-        {(conv.role || conv.serviceTitle) && (
-          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            {conv.role && <RolePill role={conv.role} />}
+        {/* Line 2: role pill — same for buyer/seller. */}
+        {(isBuyer || isSeller) && (
+          <div className="mt-1">
+            <RolePill role={conv.role!} />
+          </div>
+        )}
+
+        {/* Line 3: context tags.
+            Buyer-side: "Re: <service>" (which service of theirs).
+            Seller-side: "About: <my listing> · Re: <my service>" so
+            the seller knows which of their own businesses is being
+            inquired on, and which service. */}
+        {(conv.serviceTitle || (isSeller && conv.listingBusinessName)) && (
+          <div className="text-xs text-muted-foreground mt-1 truncate">
+            {isSeller && conv.listingBusinessName && (
+              <>About: <span className="text-foreground/80">{conv.listingBusinessName}</span></>
+            )}
+            {isSeller && conv.listingBusinessName && conv.serviceTitle && <span> · </span>}
             {conv.serviceTitle && (
-              <span className="text-xs text-muted-foreground truncate">
-                Re: <span className="text-foreground/80">{conv.serviceTitle}</span>
-              </span>
+              <>Re: <span className="text-foreground/80">{conv.serviceTitle}</span></>
             )}
           </div>
         )}
 
-        {/* Line 3: member context — name · chapter · membership type. */}
+        {/* Line 4: member context — name · chapter · membership. */}
         <p className="text-xs text-muted-foreground truncate mt-0.5">
           {[
             conv.otherName,
@@ -178,7 +218,7 @@ function ConversationRow({ conv, active }: { conv: ConversationListItem; active:
           ].filter(Boolean).join(' · ')}
         </p>
 
-        {/* Line 4: last-message preview when present. Truncated. */}
+        {/* Line 5: last-message preview. */}
         {conv.lastMessageBody && (
           <p className={cn(
             'text-xs truncate mt-0.5',
