@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { Star } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -14,6 +15,7 @@ interface ReviewFormProps {
 }
 
 export function ReviewForm({ businessId, existing }: ReviewFormProps) {
+  const router = useRouter()
   const [rating, setRating] = useState(existing?.rating ?? 0)
   const [hover, setHover] = useState(0)
   const [body, setBody] = useState(existing?.body ?? '')
@@ -32,8 +34,17 @@ export function ReviewForm({ businessId, existing }: ReviewFormProps) {
     fd.set('body', body)
     startTransition(async () => {
       const result = await submitReview(fd)
-      if (result.error) setError(result.error)
-      else setSuccess(true)
+      if (result.error) {
+        setError(result.error)
+        return
+      }
+      setSuccess(true)
+      // Pull the new review into the list immediately. Without this,
+      // submitReview's revalidatePath on the server only invalidates
+      // the route cache — the already-mounted client tree stays as it
+      // was, so Andrew (and any reviewer) submitted successfully but
+      // saw "No reviews yet" stick around and assumed nothing happened.
+      router.refresh()
     })
   }
 
@@ -43,8 +54,14 @@ export function ReviewForm({ businessId, existing }: ReviewFormProps) {
 
       {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
       {success && (
-        <Alert className="border-primary/50 bg-primary/10">
-          <AlertDescription className="text-primary font-medium">
+        // Same contrast rule as the rest of the app: subtle green tint
+        // on the surface, but the actual confirmation text uses the
+        // foreground colour so it's always legible regardless of how
+        // the browser composites the translucent green. Pre-fix Andrew
+        // hit submit and saw a green block with no readable text and
+        // assumed nothing happened.
+        <Alert className="border-primary/50 bg-primary/10 text-foreground">
+          <AlertDescription className="text-foreground font-medium">
             Review {existing ? 'updated' : 'submitted'}.
           </AlertDescription>
         </Alert>
