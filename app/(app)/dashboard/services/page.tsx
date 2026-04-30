@@ -158,7 +158,7 @@ export default async function ListingsPage() {
                         >
                           Edit
                         </Link>
-                        <ServiceActions serviceId={service.id} />
+                        <ServiceActions serviceId={service.id} serviceTitle={service.title} />
                       </div>
                     </div>
                   ))}

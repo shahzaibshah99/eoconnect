@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ArrowLeft, Pause, Play, Trash2, Plus } from 'lucide-react'
 import { pauseCampaign, resumeCampaign, deleteCampaignDraft, topUpCampaign } from '@/actions/ads'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
@@ -178,14 +179,24 @@ export function CampaignDetail({
           </Button>
         )}
         {campaign.status === 'draft' && (
-          <Button variant="outline" disabled={isPending} onClick={() => {
-            if (!confirm('Delete this draft?')) return
-            startTransition(async () => {
-              const r = await deleteCampaignDraft(campaign.id); if (r.error) toast.error(r.error); else window.location.href = '/dashboard/ads'
-            })
-          }} className="gap-1.5 text-destructive hover:text-destructive">
-            <Trash2 className="h-4 w-4" /> Delete Draft
-          </Button>
+          <ConfirmDialog
+            trigger={
+              <Button variant="outline" disabled={isPending} className="gap-1.5 text-destructive hover:text-destructive">
+                <Trash2 className="h-4 w-4" /> Delete Draft
+              </Button>
+            }
+            title="Delete this draft?"
+            description="The draft and any unspent budget will be removed. You can always create a new campaign later."
+            confirmLabel="Delete draft"
+            onConfirm={async () => {
+              const r = await deleteCampaignDraft(campaign.id)
+              if (r.error) {
+                toast.error(r.error)
+                throw new Error(r.error)
+              }
+              window.location.href = '/dashboard/ads'
+            }}
+          />
         )}
       </div>
 

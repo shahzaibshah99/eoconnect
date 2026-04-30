@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Star } from 'lucide-react'
 import { unflagReview, deleteReview } from '@/actions/admin'
 import { format } from 'date-fns'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 interface FlaggedReview {
   id: string
@@ -60,15 +61,29 @@ function ReviewCard({ review }: { review: FlaggedReview }) {
           onClick={() => startTransition(() => { unflagReview(review.id) })}>
           Unflag (keep)
         </Button>
-        <Button size="sm" variant="outline" disabled={isPending}
-          onClick={() => {
-            if (confirm('Permanently delete this review?')) {
-              startTransition(() => { deleteReview(review.id) })
-            }
+        <ConfirmDialog
+          trigger={
+            <Button size="sm" variant="outline" disabled={isPending}
+              className="text-destructive hover:text-destructive">
+              Delete
+            </Button>
+          }
+          title="Delete this review?"
+          description={
+            <>
+              Permanently delete the {review.rating}-star review from{' '}
+              <strong className="text-foreground">{review.profiles?.full_name ?? 'this member'}</strong>
+              {' '}on{' '}
+              <strong className="text-foreground">{review.businesses?.name ?? 'this listing'}</strong>?
+              This cannot be undone.
+            </>
+          }
+          confirmLabel="Delete review"
+          onConfirm={async () => {
+            const result = await deleteReview(review.id)
+            if (result?.error) throw new Error(result.error)
           }}
-          className="text-destructive hover:text-destructive">
-          Delete
-        </Button>
+        />
       </div>
     </div>
   )
