@@ -186,11 +186,31 @@ export async function sendInquiry(input: {
   if (!conversationId) {
     const { data: created, error: createErr } = await db
       .from('conversations')
-      .insert({ participant_ids: [user.id, owner_id], listing_id: business_id })
+      .insert({
+        participant_ids: [user.id, owner_id],
+        listing_id: business_id,
+        // Migration 019 adds service_id; storing it here lets the
+        // inbox UI surface "Re: <service>" structurally instead of
+        // parsing the message body.
+        service_id: service_id ?? null,
+      })
       .select('id')
       .single() as { data: { id: string } | null; error: { message: string } | null }
     if (createErr || !created) return { error: createErr?.message ?? 'Failed to start conversation' }
     conversationId = created.id
+  } else if (service_id) {
+    // Reusing an existing thread: only stamp service_id if the
+    // existing row doesn't already have one. We don't overwrite a
+    // prior service association — if the member sent an earlier
+    // inquiry about service A and is now writing about service B
+    // in the same thread, the original service stays as the
+    // canonical "what this thread is about". The body still carries
+    // the new "Re: B" prefix below for in-line context.
+    await db
+      .from('conversations')
+      .update({ service_id })
+      .eq('id', conversationId)
+      .is('service_id', null)
   }
 
   // Optional service reference prepended to the message body.

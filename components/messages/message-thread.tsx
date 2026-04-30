@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from 'react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Paperclip, Send, X, FileText } from 'lucide-react'
+import { Paperclip, Send, X, FileText, ExternalLink } from 'lucide-react'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { sendMessage } from '@/actions/messages'
@@ -34,6 +34,18 @@ interface MessageThreadProps {
   otherName: string
   otherAvatar: string | null
   businessName: string | null
+  /** Business id so the header can link the business name into the
+   *  listing. Null when the listing was deleted (header falls back
+   *  to the person-only display in that case). */
+  businessId?: string | null
+  businessLogo?: string | null
+  /** Service the inquiry was originally about, if structurally known
+   *  (set by sendInquiry from migration 019 onwards). */
+  serviceTitle?: string | null
+  /** Buyer/seller role of the current user in this thread. Drives
+   *  the You inquired / They inquired pill. Null for orphaned
+   *  conversations where role can't be determined. */
+  role?: 'buyer' | 'seller' | null
   initialMessages: Message[]
 }
 
@@ -43,6 +55,10 @@ export function MessageThread({
   otherName,
   otherAvatar,
   businessName,
+  businessId = null,
+  businessLogo = null,
+  serviceTitle = null,
+  role = null,
   initialMessages,
 }: MessageThreadProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages)
@@ -280,14 +296,46 @@ export function MessageThread({
     <>
       <div className="p-4 border-b border-border flex items-center gap-3">
         <Avatar className="h-9 w-9">
-          <AvatarImage src={otherAvatar ?? undefined} />
-          <AvatarFallback className="bg-primary/10 text-primary text-sm font-bold">
-            {otherName.charAt(0).toUpperCase()}
+          <AvatarImage src={businessLogo ?? otherAvatar ?? undefined} />
+          <AvatarFallback className="bg-primary/15 text-primary text-sm font-bold">
+            {(businessName ?? otherName).charAt(0).toUpperCase()}
           </AvatarFallback>
         </Avatar>
-        <div>
-          <p className="font-semibold text-sm">{otherName}</p>
-          {businessName && <p className="text-xs text-muted-foreground">re: {businessName}</p>}
+        <div className="min-w-0 flex-1">
+          {/* Business name is the primary heading, linkable into the
+              listing in a new tab so the chat stays open. Falls back
+              to the person's name for deleted listings. */}
+          <div className="flex items-center gap-1.5 min-w-0">
+            {businessId && businessName ? (
+              <a
+                href={`/marketplace/${businessId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-sm truncate hover:underline inline-flex items-center gap-1"
+                title={`Open ${businessName} listing`}
+              >
+                <span className="truncate">{businessName}</span>
+                <ExternalLink className="h-3 w-3 text-muted-foreground" />
+              </a>
+            ) : (
+              <p className="font-semibold text-sm truncate">{businessName ?? otherName}</p>
+            )}
+            {role && (
+              role === 'buyer' ? (
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary text-primary-foreground flex-shrink-0">
+                  You inquired
+                </span>
+              ) : (
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-secondary text-secondary-foreground flex-shrink-0">
+                  They inquired
+                </span>
+              )
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground truncate">
+            with {otherName}
+            {serviceTitle && <> · Re: <span className="text-foreground/80">{serviceTitle}</span></>}
+          </p>
         </div>
       </div>
 

@@ -41,7 +41,7 @@ export default async function MessagesPage({ searchParams }: MessagesPageProps) 
 
   const { data: conversations } = await db
     .from('conversations')
-    .select('id, participant_ids, listing_id, last_message_at, created_at')
+    .select('id, participant_ids, listing_id, service_id, last_message_at, created_at')
     .contains('participant_ids', [user.id])
     .order('last_message_at', { ascending: false })
 
@@ -49,19 +49,30 @@ export default async function MessagesPage({ searchParams }: MessagesPageProps) 
     id: string
     participant_ids: string[]
     listing_id: string | null
+    service_id: string | null
     last_message_at: string
     created_at: string
   }>
 
   const otherIds = [...new Set(convList.flatMap(c => c.participant_ids).filter(id => id !== user.id))]
   const businessIds = [...new Set(convList.map(c => c.listing_id).filter((x): x is string => !!x))]
+  const serviceIds = [...new Set(convList.map(c => c.service_id).filter((x): x is string => !!x))]
 
-  const [{ data: profiles }, { data: businesses }, { data: lastMsgs }] = await Promise.all([
+  // Pull profile metadata richly enough to populate the new business-
+  // first row layout: avatar (fallback if business has no logo), name,
+  // EO chapter, and membership type for the secondary line. Owner_id
+  // on the business tells us whether the current user is the buyer or
+  // the seller in each thread (drives the You inquired / They inquired
+  // pill).
+  const [{ data: profiles }, { data: businesses }, { data: services }, { data: lastMsgs }] = await Promise.all([
     otherIds.length
-      ? db.from('profiles').select('id, full_name, avatar_url').in('id', otherIds)
+      ? db.from('profiles').select('id, full_name, avatar_url, eo_chapter, eo_membership_type').in('id', otherIds)
       : Promise.resolve({ data: [] }),
     businessIds.length
-      ? db.from('businesses').select('id, name, logo_url').in('id', businessIds)
+      ? db.from('businesses').select('id, name, logo_url, owner_id').in('id', businessIds)
+      : Promise.resolve({ data: [] }),
+    serviceIds.length
+      ? db.from('services').select('id, title').in('id', serviceIds)
       : Promise.resolve({ data: [] }),
     convList.length
       ? db.from('messages').select('conversation_id, body, created_at, read_at, sender_id')
@@ -70,10 +81,15 @@ export default async function MessagesPage({ searchParams }: MessagesPageProps) 
       : Promise.resolve({ data: [] }),
   ])
 
-  type ProfileRow = { id: string; full_name: string; avatar_url: string | null }
-  type BusinessRow = { id: string; name: string; logo_url: string | null }
+  type ProfileRow = {
+    id: string; full_name: string; avatar_url: string | null;
+    eo_chapter: string | null; eo_membership_type: 'current_member' | 'alumni' | 'accelerator' | null
+  }
+  type BusinessRow = { id: string; name: string; logo_url: string | null; owner_id: string }
+  type ServiceRow = { id: string; title: string }
   const profileMap = new Map<string, ProfileRow>((profiles ?? []).map((p: ProfileRow) => [p.id, p]))
   const bizMap = new Map<string, BusinessRow>((businesses ?? []).map((b: BusinessRow) => [b.id, b]))
+  const serviceMap = new Map<string, ServiceRow>((services ?? []).map((s: ServiceRow) => [s.id, s]))
   const lastMsgMap = new Map<string, { body: string; created_at: string; read_at: string | null; sender_id: string }>()
   for (const m of (lastMsgs ?? [])) {
     if (!lastMsgMap.has(m.conversation_id)) lastMsgMap.set(m.conversation_id, m)
@@ -83,13 +99,28 @@ export default async function MessagesPage({ searchParams }: MessagesPageProps) 
     const otherId = c.participant_ids.find(id => id !== user.id)
     const otherProfile = otherId ? profileMap.get(otherId) : undefined
     const business = c.listing_id ? bizMap.get(c.listing_id) : undefined
+    const service = c.service_id ? serviceMap.get(c.service_id) : undefined
     const lastMsg = lastMsgMap.get(c.id)
+    // Buyer vs seller is derived from listing ownership: the listing
+    // owner is the seller, anyone else in the thread is the buyer
+    // ("inquired"). When the listing was deleted (no business row),
+    // we default to "you inquired" if the current user wasn't the
+    // original owner — but we only know that when the listing exists.
+    // For deleted listings the role pill is suppressed entirely (see
+    // ConversationList).
+    const isCurrentUserOwner = !!business && business.owner_id === user.id
     return {
       id: c.id,
       otherName: otherProfile?.full_name ?? 'Unknown',
       otherAvatar: otherProfile?.avatar_url ?? null,
+      otherChapter: otherProfile?.eo_chapter ?? null,
+      otherMembershipType: otherProfile?.eo_membership_type ?? null,
+      businessId: business?.id ?? null,
       businessName: business?.name ?? null,
       businessLogo: business?.logo_url ?? null,
+      businessDeleted: c.listing_id !== null && !business,
+      serviceTitle: service?.title ?? null,
+      role: business ? (isCurrentUserOwner ? 'seller' as const : 'buyer' as const) : null,
       lastMessageBody: lastMsg?.body ?? null,
       lastMessageAt: c.last_message_at,
       unread: lastMsg ? lastMsg.sender_id !== user.id && !lastMsg.read_at : false,
@@ -154,6 +185,10 @@ export default async function MessagesPage({ searchParams }: MessagesPageProps) 
             otherName={activeMeta.otherName}
             otherAvatar={activeMeta.otherAvatar}
             businessName={activeMeta.businessName}
+            businessId={activeMeta.businessId}
+            businessLogo={activeMeta.businessLogo}
+            serviceTitle={activeMeta.serviceTitle}
+            role={activeMeta.role}
             initialMessages={activeMessages}
           />
         ) : (
