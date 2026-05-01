@@ -74,28 +74,30 @@ export async function sendEmail(opts: {
 
 // ── Templates ─────────────────────────────────────────────────
 
-// Brand logo for email headers — inline SVG so it renders without
-// hitting external image hosts (avoids the "click to load images"
-// banner in Gmail/Outlook). The wordmark text is part of the SVG so
-// the brand still reads cleanly even if a client strips inline SVG;
-// in that case the surrounding email body still names "Member Market"
-// in the footer copy below.
-const EMAIL_LOGO_SVG = `<svg width="190" height="36" viewBox="0 0 380 72" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Member Market" style="display:block;">
-  <g transform="translate(4, 4)">
-    <rect width="64" height="64" rx="12" fill="#0A2218"/>
-    <rect x="12" y="20" width="7" height="28" rx="2" fill="#D4821A"/>
-    <rect x="12" y="20" width="18" height="8" rx="2" fill="#D4821A"/>
-    <rect x="23" y="20" width="7" height="28" rx="2" fill="#D4821A"/>
-    <rect x="23" y="20" width="18" height="8" rx="2" fill="#D4821A"/>
-    <rect x="34" y="20" width="7" height="28" rx="2" fill="#D4821A"/>
-    <rect x="45" y="20" width="7" height="28" rx="2" fill="#D4821A"/>
-  </g>
-  <text x="84" y="48"
-        font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif"
-        font-size="32"
-        font-weight="700"
-        fill="#0A2218">member<tspan fill="#D4821A">.market</tspan></text>
-</svg>`
+// Brand logo for email headers.
+//
+// Why a hosted <img> rather than inline <svg>: Gmail (the dominant
+// client our members read in) strips inline <svg> tags from HTML
+// emails as part of its sanitisation pass. Outlook is unreliable
+// for inline SVG too. PR #26 tried inline SVG and the result was
+// no logo for most recipients — only the "Member Market" text in
+// the footer copy survived.
+//
+// External <img> with absolute URL works in every major client.
+// Gmail proxies the request through their image cache; Outlook
+// fetches it directly; Apple Mail and Yahoo render it natively.
+// The "click to load images" banner some clients show is harmless
+// — once the user views one email through, the sender is allow-
+// listed and subsequent emails render without the banner.
+//
+// We resolve the absolute URL from NEXT_PUBLIC_SITE_URL with a
+// localhost dev fallback so previews still render in development.
+function emailLogoTag(): string {
+  const base =
+    process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, '') ||
+    'https://app.member.market'
+  return `<img src="${base}/email-logo.svg" width="190" height="36" alt="Member Market" style="display:block;border:0;outline:none;text-decoration:none;height:36px;width:190px;" />`
+}
 
 const wrap = (title: string, body: string) => `
 <!DOCTYPE html>
@@ -103,7 +105,7 @@ const wrap = (title: string, body: string) => `
 <body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f9f6f0;">
   <div style="max-width:560px;margin:40px auto;background:white;border-radius:12px;padding:32px;box-shadow:0 2px 8px rgba(0,0,0,0.04);">
     <div style="margin-bottom:24px;">
-      ${EMAIL_LOGO_SVG}
+      ${emailLogoTag()}
     </div>
     ${body}
     <p style="font-size:12px;color:#999;margin-top:32px;border-top:1px solid #eee;padding-top:16px;">
