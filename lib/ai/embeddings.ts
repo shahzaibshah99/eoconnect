@@ -7,7 +7,12 @@ import { openai } from '@ai-sdk/openai'
 // trip for hot keywords ("marketing", "real estate", etc.).
 const embeddingCache = new Map<string, number[]>()
 const EMBEDDING_CACHE_MAX = 500
-const EMBEDDING_TIMEOUT_MS = 3000
+// 6s — was 3s. Same logic as the parse-search bump: cold OpenAI
+// connections from a fresh serverless instance can routinely take
+// 2-4s for the first call, before the per-process cache kicks in
+// for subsequent identical queries. 3s was missing the legitimate
+// success window.
+const EMBEDDING_TIMEOUT_MS = 6000
 
 /**
  * Get a 1536-dim embedding for a piece of text.
