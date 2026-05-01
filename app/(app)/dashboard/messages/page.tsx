@@ -1,9 +1,11 @@
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 import { ConversationList } from '@/components/messages/conversation-list'
 import { MessageThread } from '@/components/messages/message-thread'
-import { Inbox } from 'lucide-react'
+import { Inbox, ChevronLeft } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 /**
  * Service-role client for marking messages as read.
@@ -223,9 +225,19 @@ export default async function MessagesPage({ searchParams }: MessagesPageProps) 
     }
   }
 
+  // Mobile UX: list-detail pattern. The two panes never share the
+  // viewport on small screens — both stacked was unreadable (the
+  // user reported "killing the experience"). Default state shows
+  // the inbox; tapping a conversation routes to ?conversation=X
+  // and that flips visibility to the thread, with a "← Inbox" link
+  // at the top to return. On md+ both panes always show.
   return (
     <div className="grid grid-cols-1 md:grid-cols-[320px_1fr] gap-4 h-[calc(100vh-12rem)]">
-      <div className="bg-card border border-border rounded-xl overflow-hidden flex flex-col">
+      {/* Inbox list — hidden on mobile when a conversation is open. */}
+      <div className={cn(
+        'bg-card border border-border rounded-xl overflow-hidden flex-col',
+        activeId ? 'hidden md:flex' : 'flex'
+      )}>
         <div className="p-4 border-b border-border">
           <h1 className="font-bold text-lg">Messages</h1>
           <p className="text-xs text-muted-foreground mt-0.5">{enriched.length} conversation{enriched.length !== 1 ? 's' : ''}</p>
@@ -233,23 +245,40 @@ export default async function MessagesPage({ searchParams }: MessagesPageProps) 
         <ConversationList conversations={enriched} activeId={activeId ?? null} />
       </div>
 
-      <div className="bg-card border border-border rounded-xl overflow-hidden flex flex-col">
+      {/* Thread — hidden on mobile when no conversation is selected.
+          Always visible on desktop (placeholder shown when nothing
+          is active there). */}
+      <div className={cn(
+        'bg-card border border-border rounded-xl overflow-hidden flex-col',
+        !activeId ? 'hidden md:flex' : 'flex'
+      )}>
         {activeId && activeMeta ? (
-          <MessageThread
-            conversationId={activeId}
-            currentUserId={user.id}
-            otherName={activeMeta.otherName}
-            otherAvatar={activeMeta.otherAvatar}
-            businessName={activeMeta.listingBusinessName}
-            businessId={activeMeta.listingBusinessId}
-            businessLogo={activeMeta.listingBusinessLogo}
-            serviceTitle={activeMeta.serviceTitle}
-            role={activeMeta.role}
-            inquirerBusinessId={activeMeta.inquirerBusinessId}
-            inquirerBusinessName={activeMeta.inquirerBusinessName}
-            inquirerBusinessLogo={activeMeta.inquirerBusinessLogo}
-            initialMessages={activeMessages}
-          />
+          <>
+            {/* Mobile-only back-to-inbox affordance. Desktop has the
+                list permanently visible so doesn't need this. */}
+            <Link
+              href="/dashboard/messages"
+              className="md:hidden flex items-center gap-1 px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground border-b border-border"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Inbox
+            </Link>
+            <MessageThread
+              conversationId={activeId}
+              currentUserId={user.id}
+              otherName={activeMeta.otherName}
+              otherAvatar={activeMeta.otherAvatar}
+              businessName={activeMeta.listingBusinessName}
+              businessId={activeMeta.listingBusinessId}
+              businessLogo={activeMeta.listingBusinessLogo}
+              serviceTitle={activeMeta.serviceTitle}
+              role={activeMeta.role}
+              inquirerBusinessId={activeMeta.inquirerBusinessId}
+              inquirerBusinessName={activeMeta.inquirerBusinessName}
+              inquirerBusinessLogo={activeMeta.inquirerBusinessLogo}
+              initialMessages={activeMessages}
+            />
+          </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-10 text-center">
             <Inbox className="h-10 w-10 text-muted-foreground mb-4" />
