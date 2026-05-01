@@ -101,6 +101,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         unreadMessages={unreadMessages}
         unreadNotifications={unreadNotifications}
         recentNotifications={recentNotifications}
+        ownedBusinessIds={(ownedBusinesses ?? []).map(b => b.id)}
         adsEnabled={ADS_ENABLED}
       />
       <main className="flex-1 mx-auto w-full max-w-[1280px] py-8 px-4 md:px-6">

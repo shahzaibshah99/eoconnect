@@ -29,6 +29,10 @@ interface NavbarProps {
   /** Most-recent reviews on the user's listings (last 5) for the
    *  bell dropdown body. */
   recentNotifications?: NotificationItem[]
+  /** Business ids the current user owns. Passed to NotificationsButton
+   *  so the realtime channel can client-filter incoming review inserts
+   *  to only those for the user's listings. */
+  ownedBusinessIds?: string[]
   adsEnabled?: boolean
 }
 
@@ -43,6 +47,7 @@ export function Navbar({
   unreadMessages = 0,
   unreadNotifications = 0,
   recentNotifications = [],
+  ownedBusinessIds = [],
   adsEnabled = false,
 }: NavbarProps) {
   const navLinks = adsEnabled
@@ -142,7 +147,11 @@ export function Navbar({
               Unread badge now lives on the nav link itself (see navLinks above).
               R2-11: NotificationBell hidden until alert behavior is defined.
               Bring back when push/in-app notifications ship. */}
-          <NotificationsButton unread={unreadNotifications} recent={recentNotifications} />
+          <NotificationsButton
+            unread={unreadNotifications}
+            recent={recentNotifications}
+            ownedBusinessIds={ownedBusinessIds}
+          />
           <SupportButton memberName={profile?.full_name ?? null} />
           <ThemeToggle />
           <Link
