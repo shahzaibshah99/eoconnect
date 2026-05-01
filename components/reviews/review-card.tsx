@@ -232,10 +232,16 @@ function AdminActions({ review }: { review: ReviewCardItem }) {
           }
         />
         <DropdownMenuContent align="end" className="w-40">
-          <DropdownMenuItem onSelect={() => setEditOpen(true)}>
+          {/* base-ui's Menu.Item wraps onClick natively but does NOT
+              fire on the React-synthetic `onSelect` (that one is for
+              text-selection events on input elements). The previous
+              code attached its handlers to onSelect and silently did
+              nothing on click — exactly the user's "I click delete
+              and nothing happens" report. */}
+          <DropdownMenuItem onClick={() => setEditOpen(true)}>
             <Pencil className="mr-2 h-4 w-4" /> Edit
           </DropdownMenuItem>
-          <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
+          <DropdownMenuItem variant="destructive" onClick={() => setDeleteOpen(true)}>
             <Trash2 className="mr-2 h-4 w-4" /> Delete
           </DropdownMenuItem>
         </DropdownMenuContent>
