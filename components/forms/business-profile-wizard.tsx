@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useRef } from 'react'
+import { useEffect, useState, useTransition, useRef } from 'react'
 import { createBusiness } from '@/actions/business'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -25,6 +25,7 @@ import {
 import { cn } from '@/lib/utils'
 import { LinkedInAutofillBanner } from '@/components/forms/linkedin-autofill-banner'
 import type { LinkedInAutofill } from '@/actions/linkedin-autofill'
+import { consumeLinkedInAutofillFromSession } from '@/lib/linkedin-autofill-cache'
 
 const STEPS = ['Business Basics', 'Categories & Keywords', 'Contact Details', 'Media', 'Review & Publish']
 const TEAM_SIZES = ['1-10', '11-50', '51-200', '201-500', '500+'] as const
@@ -114,6 +115,18 @@ export function BusinessProfileWizard({ categories }: WizardProps) {
     }
     setHasAutofilled(true)
   }
+
+  // Pick up an auto-fill payload that the OnboardingForm stashed in
+  // sessionStorage. The user pasted their LinkedIn URL on the
+  // onboarding screen, finished onboarding, was redirected here —
+  // we want the wizard to come up already populated. consume()
+  // removes the payload after reading so a future "Add another
+  // business" doesn't accidentally inherit it.
+  useEffect(() => {
+    const cached = consumeLinkedInAutofillFromSession()
+    if (cached) handleAutofill(cached)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const toggleCategory = (id: string) => {
     setFormData(prev => ({
