@@ -26,11 +26,18 @@ const ParsedSearchSchema = z.object({
 const parseCache = new Map<string, ParsedSearch>()
 const PARSE_CACHE_MAX = 200
 
-// Hard timeout so a slow OpenAI response doesn't block the entire search page.
-// At 2.5s we abort and fall through to the embedding-only path — still useful
-// because vector similarity alone returns highly relevant results for most
-// natural-language queries.
-const PARSE_TIMEOUT_MS = 2500
+// Hard timeout so a slow OpenAI response doesn't block the entire
+// search page. At 8s we abort and fall through to the embedding-only
+// path — still useful because vector similarity alone returns highly
+// relevant results for most natural-language queries.
+//
+// Was 2.5s — too tight in practice. gpt-5-nano with structured output
+// (Output.object schema) reliably takes 2-5s on a cold serverless
+// instance, even when the model is fully accessible. With 2.5s we
+// were timing out before the first token came back, falling through
+// to the empty parse, and losing the city/country/category extraction
+// the parser provides on top of vector search.
+const PARSE_TIMEOUT_MS = 8000
 
 function shouldSkipParser(query: string): boolean {
   // Single-keyword queries get nothing from the parser — there's no
@@ -58,11 +65,14 @@ export async function parseSearchQuery(
 
   try {
     const categoryList = categories.map(c => `${c.slug}: ${c.name}`).join('\n')
-    const result = await Promise.race([
-      generateText({
-        model: openai('gpt-5-nano'),
-        output: Output.object({ schema: ParsedSearchSchema }),
-        prompt: `You are a search query parser for a B2B marketplace of EO (Entrepreneurs' Organization) member businesses.
+    // Track the underlying generateText promise so its rejection
+    // (e.g. a 403 model_not_found) is logged with the real reason
+    // rather than just swallowed under "parse timeout". Without this
+    // a model-access problem looks identical to a slow response.
+    const genPromise = generateText({
+      model: openai('gpt-5-nano'),
+      output: Output.object({ schema: ParsedSearchSchema }),
+      prompt: `You are a search query parser for a B2B marketplace of EO (Entrepreneurs' Organization) member businesses.
 
 Available categories (slug: name):
 ${categoryList}
@@ -76,7 +86,16 @@ Rules:
 - Extract city and country if mentioned (e.g. "in sydney" → city: sydney). Cities should be lowercase.
 - Put remaining descriptive terms in keywords (e.g. "fintech" or "saas"). Leave empty if none.
 - Return empty arrays/strings when uncertain — never invent.`,
-      }).then(r => r.output),
+    }).then(r => r.output)
+    genPromise.catch(err => {
+      // Fires regardless of whether timeout won the race — gives us
+      // the actual API error in logs even when we already returned
+      // the empty fallback to the caller.
+      console.error('parseSearchQuery underlying call rejected:', err instanceof Error ? err.message : err)
+    })
+
+    const result = await Promise.race([
+      genPromise,
       new Promise<ParsedSearch>((_, reject) =>
         setTimeout(() => reject(new Error('parse timeout')), PARSE_TIMEOUT_MS)
       ),
