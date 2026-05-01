@@ -118,8 +118,22 @@ export async function proxy(request: NextRequest) {
   // Existing users were grandfathered in migration 005.
   if (profile && !profile.onboarded_at) {
     const p = profile
+    // /reset-password is intentionally exempt: a member who signed
+    // up but didn't finish onboarding can still forget their
+    // password and click the reset link in the recovery email. The
+    // recovery callback creates an authenticated session and
+    // forwards them to /reset-password?type=recovery — which would
+    // then hit this gate and bounce them to /onboarding before they
+    // ever got to set the new password. They'd be stuck:
+    //   - /onboarding wants them to fill out chapter info
+    //   - they can't, because they don't actually know their password
+    //   - and /reset-password is unreachable
+    // Letting them land on /reset-password first resolves the
+    // recovery flow; the onboarding gate fires next time they try
+    // to access a normal app route.
     const exemptFromOnboardingGate =
       pathname === '/onboarding' ||
+      pathname === '/reset-password' ||
       pathname.startsWith('/auth') ||
       pathname.startsWith('/api') ||
       pathname.startsWith('/_next') ||
