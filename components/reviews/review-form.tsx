@@ -157,8 +157,18 @@ export function ReviewForm({
             Reviewing as <span className="text-muted-foreground font-normal">(your business)</span>
           </Label>
           <Select value={reviewerBusinessId} onValueChange={(v) => setReviewerBusinessId(v ?? '')}>
-            <SelectTrigger id="reviewer_business_id">
-              <SelectValue placeholder="Select your business…" />
+            <SelectTrigger id="reviewer_business_id" className="w-full">
+              <SelectValue placeholder="Select your business…">
+                {/* Render-function pattern is required because base-ui's
+                    Select.Value otherwise echoes the controlled value
+                    verbatim — so a UUID `value` shows as a UUID in
+                    the trigger instead of the SelectItem's label. */}
+                {(value: string | null) => {
+                  if (!value) return null
+                  const biz = reviewerBusinesses.find(b => b.id === value)
+                  return biz?.name ?? value
+                }}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {reviewerBusinesses.map(b => (
@@ -175,8 +185,14 @@ export function ReviewForm({
             Service <span className="text-muted-foreground font-normal">(optional)</span>
           </Label>
           <Select value={serviceId} onValueChange={(v) => setServiceId(v ?? '')}>
-            <SelectTrigger id="service_id">
-              <SelectValue placeholder="Which service did you use?" />
+            <SelectTrigger id="service_id" className="w-full">
+              <SelectValue placeholder="Which service did you use?">
+                {(value: string | null) => {
+                  if (!value) return null
+                  const svc = services.find(s => s.id === value)
+                  return svc?.title ?? value
+                }}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {services.map(s => (
