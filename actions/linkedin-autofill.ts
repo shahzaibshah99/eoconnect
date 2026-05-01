@@ -63,6 +63,31 @@ function extractUsername(input: string): string | null {
 }
 
 /**
+ * LinkedIn's `founded` comes back in three different shapes
+ * depending on how their UI captured it for the company:
+ *   - null                                     → no founding year
+ *   - 2010 (number)                            → straightforward
+ *   - { year: 2010, month: null, day: null }   → object form (common)
+ *
+ * Without flattening the object case, our mapping fed the form a
+ * literal "[object Object]" string. Returns the year as a string
+ * so it slots straight into the wizard's text input.
+ */
+function extractFoundedYear(founded: unknown): string {
+  if (founded == null) return ''
+  if (typeof founded === 'number') return Number.isFinite(founded) ? String(founded) : ''
+  if (typeof founded === 'string') return founded.trim()
+  if (typeof founded === 'object') {
+    const obj = founded as { year?: number | string | null }
+    if (obj.year != null) {
+      const y = typeof obj.year === 'number' ? obj.year : Number(obj.year)
+      return Number.isFinite(y) ? String(y) : ''
+    }
+  }
+  return ''
+}
+
+/**
  * Map LinkedIn's staff range strings (and exact count fallback) to
  * the team_size enum the wizard uses. LinkedIn's ranges are wider
  * than ours at the top end so 501+ collapses to "500+".
@@ -333,7 +358,7 @@ export async function autofillFromLinkedIn(input: string): Promise<LinkedInAutof
       tagline: deriveTagline(d.tagline, d.description),
       description: (d.description ?? '').slice(0, 2000),
       website: d.website ?? '',
-      founded_year: d.founded ? String(d.founded) : '',
+      founded_year: extractFoundedYear(d.founded),
       team_size: mapStaffSize(d.staffCountRange, d.staffCount),
       city: hq.city ?? '',
       country: iso2ToCountryName(hq.countryCode ?? hq.country ?? null),
@@ -357,7 +382,7 @@ interface LinkedInResponse {
   tagline?: string
   description?: string
   website?: string
-  founded?: number | null
+  founded?: number | string | { year?: number | string | null; month?: number | null; day?: number | null } | null
   staffCount?: number
   staffCountRange?: string
   phone?: string
