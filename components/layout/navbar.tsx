@@ -18,10 +18,17 @@ import { cn } from '@/lib/utils'
 import { MessagesNavLink } from './messages-nav-link'
 import { SupportButton } from './support-button'
 import { UnreadBadge } from './unread-badge'
+import { NotificationsButton, type NotificationItem } from './notifications-button'
 
 interface NavbarProps {
   profile: Profile | null
   unreadMessages?: number
+  /** New-review notifications on the user's own listings since
+   *  profile.notifications_seen_at. Drives the bell badge. */
+  unreadNotifications?: number
+  /** Most-recent reviews on the user's listings (last 5) for the
+   *  bell dropdown body. */
+  recentNotifications?: NotificationItem[]
   adsEnabled?: boolean
 }
 
@@ -31,7 +38,13 @@ const baseLinks = [
   { href: '/dashboard/messages', label: 'Messages' },
 ] as const
 
-export function Navbar({ profile, unreadMessages = 0, adsEnabled = false }: NavbarProps) {
+export function Navbar({
+  profile,
+  unreadMessages = 0,
+  unreadNotifications = 0,
+  recentNotifications = [],
+  adsEnabled = false,
+}: NavbarProps) {
   const navLinks = adsEnabled
     ? [...baseLinks, { href: '/dashboard/ads', label: 'Ads' }]
     : baseLinks
@@ -129,6 +142,7 @@ export function Navbar({ profile, unreadMessages = 0, adsEnabled = false }: Navb
               Unread badge now lives on the nav link itself (see navLinks above).
               R2-11: NotificationBell hidden until alert behavior is defined.
               Bring back when push/in-app notifications ship. */}
+          <NotificationsButton unread={unreadNotifications} recent={recentNotifications} />
           <SupportButton memberName={profile?.full_name ?? null} />
           <ThemeToggle />
           <Link
