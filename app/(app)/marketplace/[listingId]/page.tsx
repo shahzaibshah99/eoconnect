@@ -170,10 +170,11 @@ export default async function ListingDetailPage({ params }: ListingDetailProps) 
   return (
     <div className="max-w-5xl mx-auto space-y-8">
       {/* Back affordance — returns to the previous page (marketplace
-          OR search results with the user's query intact). */}
-      <div className="-mb-4">
-        <BackButton />
-      </div>
+          OR search results with the user's query intact). Lives on
+          its own row above the cover so it isn't overlapped by the
+          cover image (a previous -mb-4 tightening collapsed it
+          underneath the cover's stacking context). */}
+      <BackButton />
 
       {/* Cover + logo */}
       <div className="relative">
