@@ -17,6 +17,7 @@ import type { Profile } from '@/types/database'
 import { cn } from '@/lib/utils'
 import { MessagesNavLink } from './messages-nav-link'
 import { SupportButton } from './support-button'
+import { UnreadBadge } from './unread-badge'
 
 interface NavbarProps {
   profile: Profile | null
@@ -52,16 +53,27 @@ export function Navbar({ profile, unreadMessages = 0, adsEnabled = false }: Navb
                   const isActive = link.href === '/dashboard'
                     ? pathname === '/dashboard'
                     : pathname.startsWith(link.href)
+                  const isMessages = link.href === '/dashboard/messages'
                   return (
                     <DropdownMenuItem key={link.href}>
                       <Link
                         href={link.href}
                         className={cn(
-                          'flex items-center w-full',
+                          'flex items-center justify-between gap-2 w-full',
                           isActive && 'text-primary font-medium'
                         )}
                       >
-                        {link.label}
+                        <span>{link.label}</span>
+                        {/* Mobile users had no unread indicator at all
+                            — Messages was just a plain link in the
+                            hamburger dropdown. Mirroring the badge
+                            from the desktop nav here. */}
+                        {isMessages && (
+                          <UnreadBadge
+                            userId={profile?.id ?? null}
+                            initialUnread={unreadMessages}
+                          />
+                        )}
                       </Link>
                     </DropdownMenuItem>
                   )

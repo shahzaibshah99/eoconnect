@@ -34,9 +34,30 @@ async function SearchResults({ searchParams }: SearchPageProps) {
   const { data: categories } = await db
     .from('categories').select('*').eq('active', true).order('sort_order')
 
-  const ALLOWED_REGIONS = ['North America', 'Europe', 'Asia Pacific', 'Middle East', 'Africa', 'Latin America']
+  // The 11 canonical EO regions, matching profiles.region's check
+  // constraint (migration 008). The filter UI surfaces this list;
+  // any other value in the URL is ignored.
+  const ALLOWED_REGIONS = [
+    'Asia Pacific',
+    'Canada',
+    'Europe',
+    'Japan',
+    'Latin America/Caribbean',
+    'MEPA',
+    'North Asia',
+    'South Asia',
+    'United States - Central',
+    'United States - East',
+    'United States - West',
+  ]
   const cityHard = params.city
-  const countryHard = (params.country && ALLOWED_REGIONS.includes(params.country)) ? params.country : null
+  // The URL param is named `country` for backwards-compat with old
+  // links and the existing FilterPanel — but its value is actually
+  // the EO region of the listing's owner. Businesses don't carry a
+  // region column (region is a member-level attribute); we resolve
+  // it through the owner's profile.row below before applying it as
+  // a filter on owner_id.
+  const regionHard = (params.country && ALLOWED_REGIONS.includes(params.country)) ? params.country : null
   const urlSlugs = Array.isArray(params.category)
     ? params.category
     : params.category ? [params.category] : []
@@ -44,10 +65,35 @@ async function SearchResults({ searchParams }: SearchPageProps) {
     ? categories.filter((c: { slug: string; id: string }) => urlSlugs.includes(c.slug)).map((c: { id: string }) => c.id)
     : []
 
+  // Resolve region → owner_id list once. If a region is selected and
+  // it has zero members, we set ownerIdsInRegion = [] so the buildBase
+  // .in() call short-circuits to no rows — better than silently
+  // dropping the filter.
+  let ownerIdsInRegion: string[] | null = null
+  if (regionHard) {
+    const { data: regionOwners } = await db
+      .from('profiles')
+      .select('id')
+      .eq('region', regionHard) as { data: Array<{ id: string }> | null }
+    ownerIdsInRegion = (regionOwners ?? []).map(r => r.id)
+  }
+
   const buildBase = () => {
     let q = db.from('businesses').select('*').eq('status', 'published')
     if (cityHard) q = q.ilike('city', `%${cityHard}%`)
-    if (countryHard) q = q.ilike('country', `%${countryHard}%`)
+    if (ownerIdsInRegion !== null) {
+      // Empty array still has to short-circuit to no rows — the
+      // alternative was the prior bug where the filter was silently
+      // dropped against businesses.country and surfaced unrelated
+      // results.
+      if (ownerIdsInRegion.length === 0) {
+        // PostgREST .in() with [] is invalid; instead force a
+        // condition that always returns empty.
+        q = q.eq('id', '00000000-0000-0000-0000-000000000000')
+      } else {
+        q = q.in('owner_id', ownerIdsInRegion)
+      }
+    }
     if (hardCatIds.length > 0) q = q.overlaps('category_ids', hardCatIds)
     return q
   }
@@ -143,7 +189,12 @@ async function SearchResults({ searchParams }: SearchPageProps) {
       query: queryText,
       tiers: tierCounts,
       final: results.length,
-      hardFilters: { city: cityHard, country: countryHard, categoryIds: hardCatIds.length },
+      hardFilters: {
+        city: cityHard,
+        region: regionHard,
+        regionOwnersFound: ownerIdsInRegion?.length ?? null,
+        categoryIds: hardCatIds.length,
+      },
     }))
   } else {
     // No query — list mode (newest first, respecting filters)
