@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import { Eye, Search, MessageCircle, LayoutList, Inbox, Megaphone, UserCog, Building2, Layers, Plus, MessageSquare } from 'lucide-react'
+import { Eye, Search, MessageCircle, LayoutList, Inbox, Megaphone, UserCog, Building2, Layers, Plus, MessageSquare, ExternalLink } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { ADS_ENABLED } from '@/lib/feature-flags'
 import { StatsCard } from '@/components/dashboard/stats-card'
@@ -144,6 +144,18 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
       {/* Profile / business management actions (MM-11, MM-12) */}
       <div className="flex flex-wrap gap-2">
+        {/* View Listing — opens in a new tab so the dashboard
+            stays put behind it. The user reported having no way
+            to see their own listing from the dashboard; this is
+            the primary affordance for that. */}
+        <Link
+          href={`/marketplace/${business.id}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'gap-1.5')}
+        >
+          <ExternalLink className="h-4 w-4" /> View My Listing
+        </Link>
         <Link
           href="/dashboard/account"
           className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'gap-1.5')}
