@@ -65,33 +65,51 @@ async function SearchResults({ searchParams }: SearchPageProps) {
     ? categories.filter((c: { slug: string; id: string }) => urlSlugs.includes(c.slug)).map((c: { id: string }) => c.id)
     : []
 
-  // Resolve region → owner_id list once. If a region is selected and
-  // it has zero members, we set ownerIdsInRegion = [] so the buildBase
-  // .in() call short-circuits to no rows — better than silently
-  // dropping the filter.
-  let ownerIdsInRegion: string[] | null = null
+  // Resolve region → list of country names via the eo_chapters
+  // reference table. The user wants the BUSINESS's location to
+  // determine region membership, not the owner's profile region —
+  // a member based in EO Brisbane could list a business operating
+  // out of London, and that listing should show up under "Europe"
+  // even though the owner's chapter is "Asia Pacific".
+  //
+  // eo_chapters maps (region, country) for every EO chapter. We
+  // pull every unique country in the selected region, then filter
+  // businesses where their country text matches any of those names
+  // (ILIKE — country fields can be free text and casing varies
+  // depending on how the LocationPicker normalised them).
+  let countriesInRegion: string[] | null = null
   if (regionHard) {
-    const { data: regionOwners } = await db
-      .from('profiles')
-      .select('id')
-      .eq('region', regionHard) as { data: Array<{ id: string }> | null }
-    ownerIdsInRegion = (regionOwners ?? []).map(r => r.id)
+    const { data: chapterCountries } = await db
+      .from('eo_chapters')
+      .select('country')
+      .eq('region', regionHard)
+      .not('country', 'is', null) as { data: Array<{ country: string | null }> | null }
+    const unique = new Set<string>()
+    for (const c of chapterCountries ?? []) {
+      if (c.country) unique.add(c.country)
+    }
+    countriesInRegion = Array.from(unique)
   }
 
   const buildBase = () => {
     let q = db.from('businesses').select('*').eq('status', 'published')
     if (cityHard) q = q.ilike('city', `%${cityHard}%`)
-    if (ownerIdsInRegion !== null) {
-      // Empty array still has to short-circuit to no rows — the
-      // alternative was the prior bug where the filter was silently
-      // dropped against businesses.country and surfaced unrelated
-      // results.
-      if (ownerIdsInRegion.length === 0) {
-        // PostgREST .in() with [] is invalid; instead force a
-        // condition that always returns empty.
+    if (countriesInRegion !== null) {
+      if (countriesInRegion.length === 0) {
+        // No EO chapters in this region (impossible with current
+        // seed data, but defensive). Short-circuit to zero rows
+        // rather than silently drop the filter.
         q = q.eq('id', '00000000-0000-0000-0000-000000000000')
       } else {
-        q = q.in('owner_id', ownerIdsInRegion)
+        // OR each country with ILIKE so casing/whitespace differences
+        // ("United States" vs "united states") don't miss matches.
+        // PostgREST's .or() takes a comma-joined string of conditions.
+        // Country names with commas don't appear in the eo_chapters
+        // seed, but escape them defensively just in case.
+        const orFilter = countriesInRegion
+          .map(c => `country.ilike.${c.replace(/,/g, '\\,')}`)
+          .join(',')
+        q = q.or(orFilter)
       }
     }
     if (hardCatIds.length > 0) q = q.overlaps('category_ids', hardCatIds)
@@ -192,7 +210,7 @@ async function SearchResults({ searchParams }: SearchPageProps) {
       hardFilters: {
         city: cityHard,
         region: regionHard,
-        regionOwnersFound: ownerIdsInRegion?.length ?? null,
+        regionCountriesFound: countriesInRegion?.length ?? null,
         categoryIds: hardCatIds.length,
       },
     }))
