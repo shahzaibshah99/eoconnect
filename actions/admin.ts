@@ -268,6 +268,61 @@ export async function deleteReview(id: string): Promise<{ error: string | null }
   const { error } = await svc.from('reviews').delete().eq('id', id)
   if (error) return { error: error.message }
   revalidatePath('/admin/reviews')
+  // Listing pages cache the review list — bust them too so the admin
+  // delete shows up immediately on the public-facing page.
+  revalidatePath('/marketplace', 'layout')
+  return { error: null }
+}
+
+/**
+ * Admin-only edit of a review's rating and body.
+ *
+ * Members can no longer self-edit reviews after submitting (PR
+ * /feat-reviews-redesign). The expectation is that members contact
+ * the EO team when something needs correcting and an admin fixes it
+ * here. Surfaced through /admin/reviews.
+ *
+ * Chapter admins can only edit reviews on businesses within their
+ * scope (same rule as deleteReview above). Super admins bypass.
+ */
+const AdminEditReviewSchema = z.object({
+  rating: z.coerce.number().int().min(1).max(5),
+  body: z.string().trim().min(1, 'Body required').max(500, 'Max 500 characters'),
+})
+
+export async function adminUpdateReview(
+  id: string,
+  formData: FormData
+): Promise<{ error: string | null }> {
+  const ctx = await requireAdmin()
+  if (ctx.error) return { error: ctx.error }
+  if (!ctx.role) return { error: 'Not authorized' }
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return { error: 'SUPABASE_SERVICE_ROLE_KEY not configured on the server' }
+  }
+
+  const parsed = AdminEditReviewSchema.safeParse({
+    rating: formData.get('rating'),
+    body: formData.get('body'),
+  })
+  if (!parsed.success) return { error: parsed.error.issues[0].message }
+
+  const svc = adminDb()
+  if (ctx.role === 'chapter_admin') {
+    const businessId = await reviewBusinessId(svc, id)
+    if (!businessId) return { error: 'Review not found' }
+    if (!(await targetInScope(svc, ctx as { role: 'chapter_admin'; scopeCountry: string | null; scopeCity: string | null }, 'businesses', businessId))) {
+      return { error: 'This review belongs to a business outside your chapter scope' }
+    }
+  }
+
+  const { error } = await svc
+    .from('reviews')
+    .update({ rating: parsed.data.rating, body: parsed.data.body })
+    .eq('id', id)
+  if (error) return { error: error.message }
+  revalidatePath('/admin/reviews')
+  revalidatePath('/marketplace', 'layout')
   return { error: null }
 }
 
