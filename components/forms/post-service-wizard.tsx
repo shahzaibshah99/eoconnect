@@ -166,7 +166,7 @@ export function PostServiceWizard({ businessId, onSuccess }: PostServiceWizardPr
             )}
 
             <div className="space-y-2">
-              <Label>Thumbnail Image *</Label>
+              <Label>Thumbnail Image <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
               <div className="flex items-center gap-4">
                 <div
                   onClick={() => thumbnailInputRef.current?.click()}
@@ -258,7 +258,7 @@ export function PostServiceWizard({ businessId, onSuccess }: PostServiceWizardPr
                 if (!formData.description.trim()) { setError('Description is required'); return }
                 if (!formData.pricing_model) { setError('Please select a pricing model'); return }
                 if (showPriceFields && !formData.price_from) { setError('Price is required for this pricing model'); return }
-                if (!thumbnailFile) { setError('Thumbnail image is required'); return }
+                // Thumbnail is optional — listings can publish without one.
                 setError(null)
                 setStep(1)
               }}
