@@ -12,7 +12,24 @@ interface FilterPanelProps {
   categories: Category[]
 }
 
-const REGIONS = ['North America', 'Europe', 'Asia Pacific', 'Middle East', 'Africa', 'Latin America']
+// The 11 canonical EO regions. Mirrors the check constraint on
+// profiles.region from migration 008. Filter selection uses these
+// values verbatim and the search page resolves them by joining
+// businesses to their owner's profile (the businesses table has no
+// region column — region lives on the member, not the listing).
+const REGIONS = [
+  'Asia Pacific',
+  'Canada',
+  'Europe',
+  'Japan',
+  'Latin America/Caribbean',
+  'MEPA',
+  'North Asia',
+  'South Asia',
+  'United States - Central',
+  'United States - East',
+  'United States - West',
+]
 
 export function FilterPanel({ categories }: FilterPanelProps) {
   const router = useRouter()
