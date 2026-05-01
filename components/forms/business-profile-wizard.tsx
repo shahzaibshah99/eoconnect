@@ -22,6 +22,7 @@ import {
   formatBytes,
   validatePortfolioAddition,
 } from '@/lib/portfolio-limits'
+import { cn } from '@/lib/utils'
 
 const STEPS = ['Business Basics', 'Categories & Keywords', 'Contact Details', 'Media', 'Review & Publish']
 const TEAM_SIZES = ['1-10', '11-50', '51-200', '201-500', '500+'] as const
@@ -173,6 +174,9 @@ export function BusinessProfileWizard({ categories }: WizardProps) {
     }
     if (n === 1) {
       if (totalCategories === 0) return 'Pick at least one category'
+      // Block continuing instead of gating the input itself — keeps
+      // the input editable so the user can remove the extra one(s).
+      if (totalCategories > 3) return 'Maximum 3 categories — remove some to continue'
       if (!formData.tags.trim()) return 'Add at least one keyword'
       if (!formData.website.trim()) return 'Website is required'
     }
@@ -278,10 +282,25 @@ export function BusinessProfileWizard({ categories }: WizardProps) {
                 value={formData.custom_categories}
                 onChange={e => update('custom_categories', e.target.value)}
                 placeholder="e.g. Blockchain, Aerospace (comma-separated)"
-                disabled={totalCategories >= 3}
               />
-              <p className="text-xs text-muted-foreground">
-                {totalCategories >= 3 ? 'Maximum 3 categories selected.' : `${3 - totalCategories} remaining slots`}
+              {/* Two prior bugs lived in the helper copy below:
+                    - "X remaining slots" was misread as a character
+                      count by a member who tried it.
+                    - The input above used to be disabled={ >= 3 },
+                      which meant a member who typed three custom
+                      categories was locked out of editing — they
+                      couldn't even backspace to fix a typo.
+                  Fix: never disable the input. Show the count vs cap
+                  with a clear "X / 3 categories" label, and turn it
+                  destructive when the cap is exceeded. validateStep
+                  blocks proceeding to the next step rather than the
+                  input gating itself. */}
+              <p className={cn(
+                'text-xs',
+                totalCategories > 3 ? 'text-destructive font-medium' : 'text-muted-foreground'
+              )}>
+                {totalCategories} / 3 categories
+                {totalCategories > 3 && ' — remove some to continue'}
               </p>
             </div>
             <div className="space-y-2">
