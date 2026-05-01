@@ -9,6 +9,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Sparkles } from 'lucide-react'
 import { ChapterPicker, type Chapter } from '@/components/forms/chapter-picker'
+import { LinkedInAutofillBanner } from '@/components/forms/linkedin-autofill-banner'
+import {
+  saveLinkedInAutofillToSession,
+  type LinkedInAutofill,
+} from '@/lib/linkedin-autofill-cache'
 
 const MEMBERSHIP_LABEL: Record<string, string> = {
   current_member: 'Current EO Member',
@@ -30,6 +35,24 @@ export function OnboardingForm({ chapters, defaultName, defaultChapter, defaultM
   const [chapter, setChapter] = useState<Chapter | null>(
     chapters.find(c => c.name === defaultChapter) ?? null
   )
+  // True once the user has run a successful LinkedIn auto-fill on
+  // this onboarding screen. Drives the banner copy and unlocks
+  // the "Saved — will pre-fill your business form" affirmation.
+  const [autofilledBusinessName, setAutofilledBusinessName] = useState<string | null>(null)
+
+  /**
+   * The autofill banner runs the same server action as it does on
+   * the new-business wizard. Here we don't have the wizard mounted
+   * yet — we save the payload to sessionStorage instead, and the
+   * wizard reads it on mount once the user lands on
+   * /dashboard/business/new. Storage is per-tab so it dies when
+   * they close the browser; that's the right behaviour for a
+   * one-time hand-off.
+   */
+  const handleAutofill = (data: LinkedInAutofill) => {
+    saveLinkedInAutofillToSession(data)
+    setAutofilledBusinessName(data.name || 'your business')
+  }
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -67,6 +90,26 @@ export function OnboardingForm({ chapters, defaultName, defaultChapter, defaultM
           {error && (
             <Alert variant="destructive">
               <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          {/* LinkedIn auto-fill — sits at the top so the member can
+              kick off the (slow) auto-fetch in parallel with filling
+              their EO chapter info. The payload lands in
+              sessionStorage and the new-business wizard picks it up
+              on the next page so the form is pre-filled when they
+              get there. Optional: if they skip it, the wizard works
+              the way it always has. */}
+          <LinkedInAutofillBanner
+            onAutofill={handleAutofill}
+            hasFilledOnce={!!autofilledBusinessName}
+          />
+          {autofilledBusinessName && (
+            <Alert className="border-green-500/40 bg-green-500/10">
+              <AlertDescription className="text-foreground">
+                <span className="font-medium">{autofilledBusinessName}</span> imported. We'll pre-fill
+                your business form on the next step — you can review and edit anything there.
+              </AlertDescription>
             </Alert>
           )}
 

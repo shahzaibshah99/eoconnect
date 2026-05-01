@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useRef } from 'react'
+import { useEffect, useState, useTransition, useRef } from 'react'
 import { createBusiness } from '@/actions/business'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -23,6 +23,9 @@ import {
   validatePortfolioAddition,
 } from '@/lib/portfolio-limits'
 import { cn } from '@/lib/utils'
+import { LinkedInAutofillBanner } from '@/components/forms/linkedin-autofill-banner'
+import type { LinkedInAutofill } from '@/actions/linkedin-autofill'
+import { consumeLinkedInAutofillFromSession } from '@/lib/linkedin-autofill-cache'
 
 const STEPS = ['Business Basics', 'Categories & Keywords', 'Contact Details', 'Media', 'Review & Publish']
 const TEAM_SIZES = ['1-10', '11-50', '51-200', '201-500', '500+'] as const
@@ -54,12 +57,76 @@ export function BusinessProfileWizard({ categories }: WizardProps) {
   const [coverPreview, setCoverPreview] = useState<string | null>(null)
   const [portfolioPreviews, setPortfolioPreviews] = useState<string[]>([])
 
+  // LinkedIn auto-fill state. When the user runs auto-fill we get a
+  // logo + cover URL already uploaded into eoconnect-media; storing
+  // them here lets validateStep accept "logo present" without a
+  // manual file pick, AND lets handleSubmit pass the URL straight
+  // through instead of re-uploading. If the user later picks a real
+  // File via the upload buttons, that takes precedence (logoFile is
+  // checked first in handleSubmit and validateStep).
+  const [prefilledLogoUrl, setPrefilledLogoUrl] = useState<string | null>(null)
+  const [prefilledCoverUrl, setPrefilledCoverUrl] = useState<string | null>(null)
+  const [hasAutofilled, setHasAutofilled] = useState(false)
+
   // File input refs
   const logoInputRef = useRef<HTMLInputElement>(null)
   const coverInputRef = useRef<HTMLInputElement>(null)
   const portfolioInputRef = useRef<HTMLInputElement>(null)
 
   const update = (key: string, value: string) => setFormData(prev => ({ ...prev, [key]: value }))
+
+  /**
+   * Apply a LinkedIn auto-fill payload onto the wizard's state.
+   *
+   * Overwrites every field the payload provides (member can still
+   * edit afterwards). Image URLs go into prefilledLogoUrl /
+   * prefilledCoverUrl AND logoPreview / coverPreview so the
+   * preview thumbnails light up immediately, but the File handles
+   * stay null — the submit flow looks for prefilled URLs as a
+   * fallback when no File is set.
+   */
+  const handleAutofill = (data: LinkedInAutofill) => {
+    setFormData(prev => ({
+      ...prev,
+      name: data.name || prev.name,
+      tagline: data.tagline || prev.tagline,
+      description: data.description || prev.description,
+      website: data.website || prev.website,
+      founded_year: data.founded_year || prev.founded_year,
+      team_size: data.team_size || prev.team_size,
+      city: data.city || prev.city,
+      country: data.country || prev.country,
+      country_code: data.country_code || prev.country_code,
+      phone: data.phone || prev.phone,
+      tags: data.tags || prev.tags,
+      category_ids: data.category_ids.length > 0 ? data.category_ids.slice(0, 3) : prev.category_ids,
+      custom_categories: data.custom_categories || prev.custom_categories,
+      social_linkedin: data.social_linkedin || prev.social_linkedin,
+    }))
+    if (data.logo_url) {
+      setPrefilledLogoUrl(data.logo_url)
+      setLogoPreview(data.logo_url)
+      setLogoFile(null) // user can override by picking a file
+    }
+    if (data.cover_url) {
+      setPrefilledCoverUrl(data.cover_url)
+      setCoverPreview(data.cover_url)
+      setCoverFile(null)
+    }
+    setHasAutofilled(true)
+  }
+
+  // Pick up an auto-fill payload that the OnboardingForm stashed in
+  // sessionStorage. The user pasted their LinkedIn URL on the
+  // onboarding screen, finished onboarding, was redirected here —
+  // we want the wizard to come up already populated. consume()
+  // removes the payload after reading so a future "Add another
+  // business" doesn't accidentally inherit it.
+  useEffect(() => {
+    const cached = consumeLinkedInAutofillFromSession()
+    if (cached) handleAutofill(cached)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const toggleCategory = (id: string) => {
     setFormData(prev => ({
@@ -75,6 +142,8 @@ export function BusinessProfileWizard({ categories }: WizardProps) {
     if (!file) return
     setLogoFile(file)
     setLogoPreview(URL.createObjectURL(file))
+    // User picking a real file overrides any previous LinkedIn auto-fill.
+    setPrefilledLogoUrl(null)
   }
 
   const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -82,6 +151,7 @@ export function BusinessProfileWizard({ categories }: WizardProps) {
     if (!file) return
     setCoverFile(file)
     setCoverPreview(URL.createObjectURL(file))
+    setPrefilledCoverUrl(null)
   }
 
   const handlePortfolioChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -129,13 +199,16 @@ export function BusinessProfileWizard({ categories }: WizardProps) {
       let cover_url: string | undefined
       let portfolio_urls: string[] = []
       try {
+        // For each image: a real File from the user takes precedence;
+        // otherwise we fall back to the URL that LinkedIn auto-fill
+        // already uploaded into eoconnect-media.
         const [logoUploaded, coverUploaded, portfolioUploaded] = await Promise.all([
-          logoFile ? uploadFile(logoFile, 'logos') : Promise.resolve(undefined),
-          coverFile ? uploadFile(coverFile, 'covers') : Promise.resolve(undefined),
+          logoFile ? uploadFile(logoFile, 'logos') : Promise.resolve(prefilledLogoUrl ?? undefined),
+          coverFile ? uploadFile(coverFile, 'covers') : Promise.resolve(prefilledCoverUrl ?? undefined),
           Promise.all(portfolioFiles.map(f => uploadFile(f, 'portfolio'))),
         ])
-        logo_url = logoUploaded
-        cover_url = coverUploaded
+        logo_url = logoUploaded ?? undefined
+        cover_url = coverUploaded ?? undefined
         portfolio_urls = portfolioUploaded
       } catch (err) {
         setError(err instanceof Error ? err.message : 'File upload failed')
@@ -185,8 +258,9 @@ export function BusinessProfileWizard({ categories }: WizardProps) {
       // Phone is optional — many businesses don't want their direct line public.
     }
     if (n === 3) {
-      if (!logoFile) return 'Logo is required'
-      if (!coverFile) return 'Cover image is required'
+      // Either a freshly-picked File OR a LinkedIn-imported URL is fine.
+      if (!logoFile && !prefilledLogoUrl) return 'Logo is required'
+      if (!coverFile && !prefilledCoverUrl) return 'Cover image is required'
     }
     return null
   }
@@ -208,6 +282,11 @@ export function BusinessProfileWizard({ categories }: WizardProps) {
         {step === 0 && (
           <div className="space-y-4">
             <h2 className="text-xl font-bold">Tell us about your business</h2>
+            {/* Auto-fill from LinkedIn — only on step 0 because that's
+                where every field this drives lives at the top of the
+                wizard. Subsequent steps still let the member edit
+                anything that didn't come back right. */}
+            <LinkedInAutofillBanner onAutofill={handleAutofill} hasFilledOnce={hasAutofilled} />
             <div className="space-y-2">
               <Label htmlFor="name">Business Name *</Label>
               <Input id="name" value={formData.name} onChange={e => update('name', e.target.value)} placeholder="Acme Consulting Ltd." required />
@@ -463,8 +542,8 @@ export function BusinessProfileWizard({ categories }: WizardProps) {
                 <div className="flex justify-between"><span className="text-muted-foreground">Location</span><span>{[formData.city, formData.country].filter(Boolean).join(', ') || '—'}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Categories</span><span>{totalCategories} selected</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Keywords</span><span>{formData.tags ? formData.tags.split(',').filter(Boolean).length : 0}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Logo</span><span>{logoFile ? '✓ uploaded' : '—'}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Cover</span><span>{coverFile ? '✓ uploaded' : '—'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Logo</span><span>{logoFile ? '✓ uploaded' : prefilledLogoUrl ? '✓ from LinkedIn' : '—'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Cover</span><span>{coverFile ? '✓ uploaded' : prefilledCoverUrl ? '✓ from LinkedIn' : '—'}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Portfolio</span><span>{portfolioFiles.length > 0 ? `${portfolioFiles.length} PDF${portfolioFiles.length === 1 ? '' : 's'}` : '—'}</span></div>
               </div>
               <p className="text-sm text-muted-foreground">
