@@ -27,6 +27,14 @@ interface SearchPageProps {
 
 async function SearchResults({ searchParams }: SearchPageProps) {
   const params = await searchParams
+  // Runtime diagnostic: is OPENAI_API_KEY actually in process.env on
+  // the deployed container? Build logs don't show env vars, and the
+  // [search] line below only reports embedding_ok=0/1 which can be 0
+  // for two completely different reasons (key missing OR OpenAI call
+  // failed). This isolates the first cause.
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn('[search] OPENAI_API_KEY is NOT set at runtime — vector search and AI parser will be skipped')
+  }
   const supabase = await createClient()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any
