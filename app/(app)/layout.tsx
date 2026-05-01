@@ -13,13 +13,39 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any
 
+  // Profile select is split from notifications_seen_at on purpose:
+  // if a migration that adds a future profiles column hasn't been
+  // applied yet, the WHOLE profile select fails and the layout
+  // renders as if the user has no profile at all — broken avatar,
+  // missing admin link, etc. Keeping the core profile query stable
+  // and pulling forward-compatible fields like notifications_seen_at
+  // separately localises the blast radius of a missing column to
+  // just the feature that depends on it (notifications bell).
   const [{ data: profile }, { data: convs }, { data: ownedBusinesses }] = await Promise.all([
-    supabase.from('profiles').select('id, full_name, avatar_url, eo_chapter, role, status, notifications_seen_at').eq('id', user.id).single(),
+    supabase.from('profiles').select('id, full_name, avatar_url, eo_chapter, role, status').eq('id', user.id).single(),
     db.from('conversations').select('id').contains('participant_ids', [user.id]) as Promise<{ data: Array<{ id: string }> | null }>,
     db.from('businesses').select('id, name').eq('owner_id', user.id) as Promise<{
       data: Array<{ id: string; name: string }> | null
     }>,
   ])
+
+  // Separate, optional fetch for notifications_seen_at. Wrapped so
+  // a missing column / unapplied migration just returns null instead
+  // of bubbling up and torpedoing the page.
+  let notificationsSeenAt: string | null = null
+  try {
+    const { data: notifProfile } = await db
+      .from('profiles')
+      .select('notifications_seen_at')
+      .eq('id', user.id)
+      .single() as { data: { notifications_seen_at: string | null } | null }
+    notificationsSeenAt = notifProfile?.notifications_seen_at ?? null
+  } catch {
+    // Migration 020 not yet applied — silently skip notifications.
+    // The bell will show 0 unread until the column exists; profile
+    // / admin nav still render correctly because the core profile
+    // query above doesn't depend on this.
+  }
 
   let unreadMessages = 0
   if (convs && convs.length > 0) {
@@ -49,10 +75,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (ownedBusinesses && ownedBusinesses.length > 0) {
     const businessIds = ownedBusinesses.map(b => b.id)
     const businessNameById = new Map(ownedBusinesses.map(b => [b.id, b.name]))
-    // Cast through unknown — the Database generic doesn't yet know
-    // about notifications_seen_at (added in migration 020). Once
-    // types are regenerated this cast can drop.
-    const seenAt = ((profile as unknown as { notifications_seen_at?: string | null })?.notifications_seen_at) ?? new Date().toISOString()
+    // notificationsSeenAt was fetched above in a try/catch so a
+    // missing column doesn't break the rest of the layout. If null,
+    // anchor at "now" — that means existing reviews don't count as
+    // unread, only ones that arrive after this render.
+    const seenAt = notificationsSeenAt ?? new Date().toISOString()
     // Pull the latest reviews on user's businesses across two
     // queries: count of unread (since seen_at) for the badge, plus
     // the 5 most-recent reviews for the dropdown body.
