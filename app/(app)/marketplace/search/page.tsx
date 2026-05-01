@@ -4,6 +4,7 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { SearchBar } from '@/components/marketplace/search-bar'
 import { FilterPanel } from '@/components/marketplace/filter-panel'
+import { MobileFilterBar } from '@/components/marketplace/mobile-filter-bar'
 import { ListingCard } from '@/components/marketplace/listing-card'
 import { getEmbedding } from '@/lib/ai/embeddings'
 import { refreshBusinessEmbedding } from '@/lib/ai/refresh-business-embedding'
@@ -315,6 +316,12 @@ async function SearchResults({ searchParams }: SearchPageProps) {
       </aside>
 
       <div className="flex-1 min-w-0">
+        {/* Mobile-only filter pills. Sidebar above covers desktop. */}
+        {categories && (
+          <div className="mb-4">
+            <MobileFilterBar categories={categories} />
+          </div>
+        )}
         <div className="flex items-center justify-between mb-4">
           <p className="text-sm text-muted-foreground">
             Showing <span className="font-semibold text-foreground">{results.length}</span> results
