@@ -22,6 +22,10 @@ export interface Profile {
   role: UserRole
   status: UserStatus
   created_at: string
+  /** Timestamp of when the member last opened the notifications
+   *  bell. Reviews on the member's listings created after this
+   *  show as unread. Set by markNotificationsRead. */
+  notifications_seen_at: string | null
 }
 
 export interface Category {
