@@ -10,6 +10,11 @@ const ReviewSchema = z.object({
   business_id: z.string().uuid(),
   rating: z.coerce.number().int().min(1).max(5),
   body: z.string().trim().min(20, 'Review must be at least 20 characters').max(500, 'Max 500 characters'),
+  // New optional context (migration 020). reviewer_business_id is
+  // the reviewer's own business they did the work as; service_id is
+  // the reviewed business's specific service the review is about.
+  reviewer_business_id: z.string().uuid().optional(),
+  service_id: z.string().uuid().optional(),
 })
 
 const ReplySchema = z.object({
@@ -24,24 +29,40 @@ export async function submitReview(formData: FormData): Promise<{ error: string 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Not authenticated' }
 
+  // Coerce empty strings to undefined so the optional() schema
+  // doesn't try to validate them as UUIDs.
+  const reviewer_business_id = (formData.get('reviewer_business_id') as string | null) || undefined
+  const service_id = (formData.get('service_id') as string | null) || undefined
+
   const parsed = ReviewSchema.safeParse({
     business_id: formData.get('business_id'),
     rating: formData.get('rating'),
     body: formData.get('body'),
+    reviewer_business_id,
+    service_id,
   })
   if (!parsed.success) return { error: parsed.error.issues[0].message }
 
-  const { error } = await db.from('reviews').upsert(
-    {
-      business_id: parsed.data.business_id,
-      reviewer_id: user.id,
-      rating: parsed.data.rating,
-      body: parsed.data.body,
-    },
-    { onConflict: 'business_id,reviewer_id' }
-  )
+  // Submit-once semantics: members can't self-edit. A duplicate
+  // review (same reviewer + same business) returns a clear error.
+  // Admins still have an edit path through the admin panel.
+  const { error } = await db.from('reviews').insert({
+    business_id: parsed.data.business_id,
+    reviewer_id: user.id,
+    rating: parsed.data.rating,
+    body: parsed.data.body,
+    reviewer_business_id: parsed.data.reviewer_business_id ?? null,
+    service_id: parsed.data.service_id ?? null,
+  }) as { error: { code?: string; message: string } | null }
 
-  if (error) return { error: error.message }
+  if (error) {
+    // 23505 = unique_violation on (business_id, reviewer_id) — the
+    // member already left a review on this listing.
+    if (error.code === '23505') {
+      return { error: "You've already reviewed this business. Reviews can't be edited — contact the EO team if you need a correction." }
+    }
+    return { error: error.message }
+  }
 
   // Fire-and-forget email to the business owner
   void (async () => {

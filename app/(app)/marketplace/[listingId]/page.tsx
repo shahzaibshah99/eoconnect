@@ -31,7 +31,7 @@ const FacebookIcon = (props: React.SVGProps<SVGSVGElement>) => (
 import { InquiryDialog } from '@/components/marketplace/inquiry-dialog'
 import { externalUrl } from '@/lib/external-url'
 import { ReviewForm } from '@/components/reviews/review-form'
-import { ReplyForm } from '@/components/reviews/reply-form'
+import { ReviewCard, type ReviewCardItem } from '@/components/reviews/review-card'
 import { cn } from '@/lib/utils'
 
 const MEMBERSHIP_LABEL: Record<string, string> = {
@@ -51,10 +51,23 @@ export default async function ListingDetailPage({ params }: ListingDetailProps) 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any
 
+  // Reviews now pull the reviewer's profile (name, avatar, chapter,
+  // membership) AND a join to their reviewer_business + the
+  // service_id of the review's specific service. The card renders
+  // the reviewer's BUSINESS as the primary identity when available.
   const [{ data: business }, { data: services }, { data: reviews }, { data: categories }] = await Promise.all([
     db.from('businesses').select('*, profiles!owner_id(full_name, avatar_url, eo_chapter, eo_membership_type, linkedin_url)').eq('id', listingId).eq('status', 'published').single(),
     db.from('services').select('*').eq('business_id', listingId).eq('status', 'published'),
-    db.from('reviews').select('*, profiles!reviewer_id(full_name, avatar_url)').eq('business_id', listingId).eq('flagged', false).order('created_at', { ascending: false }),
+    db.from('reviews')
+      .select(`
+        *,
+        profiles!reviewer_id(full_name, avatar_url, eo_chapter, eo_membership_type),
+        reviewer_business:businesses!reviewer_business_id(id, name, logo_url),
+        service:services!service_id(id, title)
+      `)
+      .eq('business_id', listingId)
+      .eq('flagged', false)
+      .order('created_at', { ascending: false }),
     supabase.from('categories').select('id, name').eq('active', true),
   ])
 
@@ -81,25 +94,77 @@ export default async function ListingDetailPage({ params }: ListingDetailProps) 
     }
   })
 
-  const reviewList = (reviews ?? []) as Array<{
+  type RawReview = {
     id: string
     reviewer_id: string
     rating: number
     body: string | null
     owner_reply: string | null
-    profiles?: { full_name?: string }
-  }>
+    profiles?: {
+      full_name?: string
+      avatar_url?: string | null
+      eo_chapter?: string | null
+      eo_membership_type?: 'current_member' | 'alumni' | 'accelerator' | null
+    } | null
+    reviewer_business?: { id: string; name: string; logo_url: string | null } | null
+    service?: { id: string; title: string } | null
+  }
+  const rawReviews = (reviews ?? []) as RawReview[]
 
-  const avgRating = reviewList.length
-    ? reviewList.reduce((sum, r) => sum + r.rating, 0) / reviewList.length
+  // Normalize the joined fields into the shape the ReviewCard expects.
+  const reviewList: ReviewCardItem[] = rawReviews.map(r => ({
+    id: r.id,
+    rating: r.rating,
+    body: r.body,
+    owner_reply: r.owner_reply,
+    reviewerName: r.profiles?.full_name ?? 'Member',
+    reviewerAvatar: r.profiles?.avatar_url ?? null,
+    reviewerChapter: r.profiles?.eo_chapter ?? null,
+    reviewerMembershipType: r.profiles?.eo_membership_type ?? null,
+    reviewerBusinessId: r.reviewer_business?.id ?? null,
+    reviewerBusinessName: r.reviewer_business?.name ?? null,
+    reviewerBusinessLogo: r.reviewer_business?.logo_url ?? null,
+    serviceTitle: r.service?.title ?? null,
+  }))
+
+  const avgRating = rawReviews.length
+    ? rawReviews.reduce((sum, r) => sum + r.rating, 0) / rawReviews.length
     : null
 
   const businessCategories = (categories as Array<{ id: string; name: string }> | null)
     ?.filter(c => business.category_ids?.includes(c.id)) ?? []
 
   const isOwner = user?.id === business.owner_id
-  const myReview = user ? reviewList.find(r => r.reviewer_id === user.id) : null
+  const myReviewRaw = user ? rawReviews.find(r => r.reviewer_id === user.id) : null
+  // Existing review the form should treat as already-submitted
+  // (drives the non-editable "you've reviewed this" card).
+  const myReviewExisting = myReviewRaw
+    ? { rating: myReviewRaw.rating, body: myReviewRaw.body }
+    : null
   const portfolioUrls = (business.portfolio_urls ?? []) as string[]
+
+  // Pull current viewer's role + their own businesses so we can:
+  //   - hand the reviewer's businesses to ReviewForm's "Reviewing as"
+  //     picker (only if they have any)
+  //   - tell ReviewCard whether to render admin edit/delete actions
+  let viewerRole: 'member' | 'chapter_admin' | 'super_admin' = 'member'
+  let reviewerBusinesses: Array<{ id: string; name: string }> = []
+  if (user) {
+    const [{ data: viewerProfile }, { data: viewerBusinesses }] = await Promise.all([
+      db.from('profiles').select('role').eq('id', user.id).single() as Promise<{
+        data: { role: 'member' | 'chapter_admin' | 'super_admin' } | null
+      }>,
+      db.from('businesses').select('id, name').eq('owner_id', user.id).order('created_at', { ascending: false }) as Promise<{
+        data: Array<{ id: string; name: string }> | null
+      }>,
+    ])
+    if (viewerProfile?.role) viewerRole = viewerProfile.role
+    reviewerBusinesses = viewerBusinesses ?? []
+  }
+  const isAdmin = viewerRole === 'chapter_admin' || viewerRole === 'super_admin'
+
+  const reviewableServices = ((services as Array<{ id: string; title: string }> | null) ?? [])
+    .map(s => ({ id: s.id, title: s.title }))
 
   return (
     <div className="max-w-5xl mx-auto space-y-8">
@@ -426,36 +491,24 @@ export default async function ListingDetailPage({ params }: ListingDetailProps) 
 
         {!isOwner && user && (
           <div className="mb-6">
-            <ReviewForm businessId={business.id} existing={myReview ? { rating: myReview.rating, body: myReview.body } : null} />
+            <ReviewForm
+              businessId={business.id}
+              existing={myReviewExisting}
+              reviewerBusinesses={reviewerBusinesses}
+              services={reviewableServices}
+            />
           </div>
         )}
 
         {reviewList.length > 0 ? (
           <div className="space-y-4">
             {reviewList.map(review => (
-              <div key={review.id} className="bg-card border border-border rounded-xl p-5">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center text-sm font-bold text-primary">
-                    {review.profiles?.full_name?.charAt(0) ?? 'M'}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">{review.profiles?.full_name ?? 'Member'}</p>
-                    <div className="flex gap-0.5">
-                      {[1,2,3,4,5].map(n => (
-                        <Star key={n} className={`h-3 w-3 ${n <= review.rating ? 'fill-primary text-primary' : 'text-muted'}`} />
-                      ))}
-                    </div>
-                  </div>
-                </div>
-                {review.body && <p className="text-sm text-muted-foreground">{review.body}</p>}
-                {review.owner_reply && (
-                  <div className="mt-3 pl-4 border-l-2 border-primary/30">
-                    <p className="text-xs font-semibold text-primary mb-1">Owner response</p>
-                    <p className="text-sm text-muted-foreground">{review.owner_reply}</p>
-                  </div>
-                )}
-                {isOwner && <ReplyForm reviewId={review.id} existing={review.owner_reply} />}
-              </div>
+              <ReviewCard
+                key={review.id}
+                review={review}
+                isListingOwner={isOwner}
+                isAdmin={isAdmin}
+              />
             ))}
           </div>
         ) : (
