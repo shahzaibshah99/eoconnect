@@ -32,6 +32,7 @@ import { InquiryDialog } from '@/components/marketplace/inquiry-dialog'
 import { externalUrl } from '@/lib/external-url'
 import { ReviewForm } from '@/components/reviews/review-form'
 import { ReviewCard, type ReviewCardItem } from '@/components/reviews/review-card'
+import { BackButton } from '@/components/marketplace/back-button'
 import { cn } from '@/lib/utils'
 
 const MEMBERSHIP_LABEL: Record<string, string> = {
@@ -168,6 +169,12 @@ export default async function ListingDetailPage({ params }: ListingDetailProps) 
 
   return (
     <div className="max-w-5xl mx-auto space-y-8">
+      {/* Back affordance — returns to the previous page (marketplace
+          OR search results with the user's query intact). */}
+      <div className="-mb-4">
+        <BackButton />
+      </div>
+
       {/* Cover + logo */}
       <div className="relative">
         {business.cover_url ? (
