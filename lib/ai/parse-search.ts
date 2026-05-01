@@ -27,17 +27,22 @@ const parseCache = new Map<string, ParsedSearch>()
 const PARSE_CACHE_MAX = 200
 
 // Hard timeout so a slow OpenAI response doesn't block the entire
-// search page. At 8s we abort and fall through to the embedding-only
+// search page. At 2.5s we abort and fall through to the embedding-only
 // path — still useful because vector similarity alone returns highly
 // relevant results for most natural-language queries.
 //
-// Was 2.5s — too tight in practice. gpt-5-nano with structured output
-// (Output.object schema) reliably takes 2-5s on a cold serverless
-// instance, even when the model is fully accessible. With 2.5s we
-// were timing out before the first token came back, falling through
-// to the empty parse, and losing the city/country/category extraction
-// the parser provides on top of vector search.
-const PARSE_TIMEOUT_MS = 8000
+// PR #46 bumped this to 8s based on a wrong hypothesis (assumed cold
+// gpt-5-nano calls reliably take 5s+ to first token). In practice it
+// just made every search where the parser failed wait the full 8s
+// before showing results, even though the embedding finished in
+// ~500ms. The Promise.all in search/page.tsx awaits both, so the
+// slower one sets the floor.
+//
+// Reverted to 2.5s. If parser usefully completes within that window,
+// great. Otherwise we fall through to embedding-only search which is
+// already very effective. Better to be fast and slightly less
+// precise than slow with the same end result.
+const PARSE_TIMEOUT_MS = 2500
 
 function shouldSkipParser(query: string): boolean {
   // Single-keyword queries get nothing from the parser — there's no
