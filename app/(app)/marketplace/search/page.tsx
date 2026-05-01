@@ -148,13 +148,42 @@ async function SearchResults({ searchParams }: SearchPageProps) {
       const { data: matches, error: rpcErr } = await db.rpc('search_businesses_by_embedding', {
         query_embedding: queryEmbedding,
         match_count: 50,
-        // Raised from 0.20 (which let "ai consultancy" match real estate
-        // searches because both are "Australian businesses"). 0.45 is a
-        // pragmatic threshold for text-embedding-3-small cosine distance.
-        min_similarity: 0.45,
+        // 0.30 — was 0.45. The earlier value was tuned for fully-
+        // formed queries like "ai consultancy" and was too strict
+        // for typo'd / casual queries the user actually types ("ai
+        // specalist in austrlia"). text-embedding-3-small handles
+        // typos reasonably well — cosine sim still hits 0.35-0.45
+        // for typo'd phrases vs the closest business — but our 0.45
+        // floor was clipping those. 0.30 trades a bit of precision
+        // for recall, which matters more on a small dataset where a
+        // false-negative is way worse than an extra slightly-off
+        // result.
+        min_similarity: 0.30,
       }) as { data: Array<{ id: string; similarity: number }> | null; error: { message: string } | null }
       if (rpcErr) tierCounts.vector_rpc_error = 1
       tierCounts.tier1_vector_raw = matches?.length ?? 0
+      // Surface the top-similarity score for visibility — when
+      // tier1_vector_raw is 0, this tells us whether anything
+      // CAME CLOSE (e.g. 0.28 = barely missed) vs there being no
+      // semantically-related listings at all (e.g. 0.10 across
+      // the board → genuinely nothing relevant in the index).
+      if (matches && matches.length > 0) {
+        tierCounts.tier1_top_similarity = Math.round(matches[0].similarity * 100) / 100
+      } else {
+        // No matches passed the 0.30 threshold. Run the RPC again
+        // with min_similarity=0 so we can see the BEST near-miss in
+        // the logs. This is purely diagnostic — we don't surface
+        // these results to the user; they're just for "is the
+        // embedding-vs-corpus distance large or small?" debugging.
+        const { data: nearMiss } = await db.rpc('search_businesses_by_embedding', {
+          query_embedding: queryEmbedding,
+          match_count: 1,
+          min_similarity: 0,
+        }) as { data: Array<{ id: string; similarity: number }> | null }
+        if (nearMiss && nearMiss.length > 0) {
+          tierCounts.tier1_near_miss = Math.round(nearMiss[0].similarity * 100) / 100
+        }
+      }
 
       if (matches && matches.length > 0) {
         const orderedIds = matches.map(m => m.id)
