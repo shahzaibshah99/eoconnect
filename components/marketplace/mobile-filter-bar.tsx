@@ -1,7 +1,7 @@
 'use client'
 
+import { forwardRef, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useCallback } from 'react'
 import { ChevronDown, X } from 'lucide-react'
 import {
   DropdownMenu,
@@ -195,29 +195,41 @@ export function MobileFilterBar({ categories }: MobileFilterBarProps) {
   )
 }
 
-interface PillButtonProps {
+interface PillButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   active: boolean
-  children: React.ReactNode
 }
 
 /**
- * Pill-shaped button for the filter bar. Forwards the rendered
- * <button> through DropdownMenuTrigger's `render` prop so base-ui
- * can wire its own click handlers on top.
+ * Pill-shaped button for the filter bar.
+ *
+ * forwardRef + spread of incoming props is REQUIRED for base-ui's
+ * <DropdownMenuTrigger render={<PillButton ...>}> pattern to work.
+ * base-ui uses cloneElement under the hood and injects onClick,
+ * onPointerDown, aria-expanded, the trigger ref, and several data-*
+ * attributes onto the rendered element. Without forwardRef + spread
+ * those props land on the OUTER PillButton component (which ignores
+ * them) instead of the actual <button>, so the pill renders but
+ * doesn't open the dropdown — exactly the "pills not clickable"
+ * behaviour the user reported.
  */
-const PillButton = function PillButton({ active, children }: PillButtonProps) {
-  return (
-    <button
-      type="button"
-      className={cn(
-        'inline-flex items-center gap-1 px-3 h-8 rounded-full border text-xs font-medium transition-colors flex-shrink-0',
-        active
-          ? 'bg-primary/10 border-primary/40 text-primary hover:bg-primary/15'
-          : 'bg-background border-border text-foreground hover:bg-muted'
-      )}
-    >
-      <span>{children}</span>
-      <ChevronDown className="h-3 w-3 opacity-70" />
-    </button>
-  )
-}
+const PillButton = forwardRef<HTMLButtonElement, PillButtonProps>(
+  function PillButton({ active, children, className, ...props }, ref) {
+    return (
+      <button
+        ref={ref}
+        type="button"
+        {...props}
+        className={cn(
+          'inline-flex items-center gap-1 px-3 h-8 rounded-full border text-xs font-medium transition-colors flex-shrink-0',
+          active
+            ? 'bg-primary/10 border-primary/40 text-primary hover:bg-primary/15'
+            : 'bg-background border-border text-foreground hover:bg-muted',
+          className
+        )}
+      >
+        <span>{children}</span>
+        <ChevronDown className="h-3 w-3 opacity-70" />
+      </button>
+    )
+  }
+)

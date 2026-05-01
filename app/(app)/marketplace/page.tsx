@@ -67,8 +67,36 @@ export default async function MarketplacePage() {
   const otherSlice = otherChapterListings.slice(0, 8)
   const fallbackRecent = viewerChapter ? [] : all.slice(0, 8)
 
-  // One sponsored slot at position 0 of the primary list.
+  // Pull review aggregates for every business we'll render so the
+  // listing cards can show their "★ 4.6 (12)" footer. Same shape as
+  // /marketplace/search (one round-trip, bucket in JS — supabase-js
+  // doesn't expose Postgres group-by aggregates).
   const recentBusinessIds = all.map((b: Business) => b.id)
+  const reviewStatsByBusiness = new Map<string, { count: number; avg: number }>()
+  if (recentBusinessIds.length > 0) {
+    const { data: reviewRows } = await db
+      .from('reviews')
+      .select('business_id, rating')
+      .in('business_id', recentBusinessIds) as {
+        data: Array<{ business_id: string; rating: number }> | null
+      }
+    const sums = new Map<string, { sum: number; count: number }>()
+    for (const r of reviewRows ?? []) {
+      const cur = sums.get(r.business_id) ?? { sum: 0, count: 0 }
+      cur.sum += r.rating
+      cur.count += 1
+      sums.set(r.business_id, cur)
+    }
+    for (const [id, s] of sums.entries()) {
+      reviewStatsByBusiness.set(id, { count: s.count, avg: s.sum / s.count })
+    }
+  }
+  const withReviews = (b: Business) => {
+    const s = reviewStatsByBusiness.get(b.id)
+    return { ...b, avg_rating: s?.avg, review_count: s?.count }
+  }
+
+  // One sponsored slot at position 0 of the primary list.
   const ads = await pickAds({ page: 'marketplace', limit: 1, excludeBusinessIds: recentBusinessIds })
   let sponsored: { business: Business; campaignId: string } | null = null
   if (ads.length > 0) {
@@ -121,7 +149,7 @@ export default async function MarketplacePage() {
               />
             )}
             {yourSlice.map(b => (
-              <ListingCard key={b.id} business={b} />
+              <ListingCard key={b.id} business={withReviews(b)} />
             ))}
           </div>
         </section>
@@ -152,7 +180,7 @@ export default async function MarketplacePage() {
               />
             )}
             {(viewerChapter ? otherSlice : fallbackRecent).map(b => (
-              <ListingCard key={b.id} business={b} />
+              <ListingCard key={b.id} business={withReviews(b)} />
             ))}
           </div>
         </section>

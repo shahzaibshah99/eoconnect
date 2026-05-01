@@ -240,6 +240,33 @@ async function SearchResults({ searchParams }: SearchPageProps) {
   }
   // 'relevance' keeps the embedding-similarity ordering.
 
+  // Pull review aggregates for every business we'll render so the
+  // card can show "★ 4.6 (12)". Single round-trip, then bucket in JS.
+  // No native Postgres-level aggregate via supabase-js client (groupBy
+  // isn't supported), so this fetches the rows we need and aggregates
+  // here. Results are typically ≤50, reviews per business are small —
+  // the round-trip stays under 50ms in practice.
+  const allBusinessIds = results.map(b => b.id)
+  const reviewStatsByBusiness = new Map<string, { count: number; avg: number }>()
+  if (allBusinessIds.length > 0) {
+    const { data: reviewRows } = await db
+      .from('reviews')
+      .select('business_id, rating')
+      .in('business_id', allBusinessIds) as {
+        data: Array<{ business_id: string; rating: number }> | null
+      }
+    const sums = new Map<string, { sum: number; count: number }>()
+    for (const r of reviewRows ?? []) {
+      const cur = sums.get(r.business_id) ?? { sum: 0, count: 0 }
+      cur.sum += r.rating
+      cur.count += 1
+      sums.set(r.business_id, cur)
+    }
+    for (const [id, s] of sums.entries()) {
+      reviewStatsByBusiness.set(id, { count: s.count, avg: s.sum / s.count })
+    }
+  }
+
   // Sponsored ads (excludes organic results)
   const organicBusinessIds = results.map((b) => b.id)
   const ads = await pickAds({
@@ -351,7 +378,17 @@ async function SearchResults({ searchParams }: SearchPageProps) {
                   )
                 } else if (organic[organicIdx]) {
                   const b = organic[organicIdx]
-                  cards.push(<ListingCard key={b.id} business={b} />)
+                  const stats = reviewStatsByBusiness.get(b.id)
+                  cards.push(
+                    <ListingCard
+                      key={b.id}
+                      business={{
+                        ...b,
+                        avg_rating: stats?.avg,
+                        review_count: stats?.count,
+                      }}
+                    />
+                  )
                   organicIdx++
                 }
               }

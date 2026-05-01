@@ -15,8 +15,12 @@ interface ListingCardProps {
 
 export function ListingCard({ business }: ListingCardProps) {
   return (
-    <Link href={`/marketplace/${business.id}`}>
-      <div className="group bg-card border border-border rounded-xl overflow-hidden hover:border-primary transition-all hover:shadow-lg">
+    // h-full + flex-col on the card lets every grid cell stretch to
+    // the tallest sibling. Internal sections then push the location
+    // row to the bottom with mt-auto so the row of cards aligns
+    // visually regardless of tagline length.
+    <Link href={`/marketplace/${business.id}`} className="block h-full">
+      <div className="group bg-card border border-border rounded-xl overflow-hidden hover:border-primary transition-all hover:shadow-lg flex flex-col h-full">
         {business.cover_url ? (
           <div className="relative h-32 w-full">
             <Image src={business.cover_url} alt={business.name} fill className="object-cover" />
@@ -36,7 +40,7 @@ export function ListingCard({ business }: ListingCardProps) {
           </div>
         )}
 
-        <div className="p-4">
+        <div className="p-4 flex flex-col flex-1">
           <div className="flex items-start gap-3 mb-3">
             {business.logo_url ? (
               <div className="relative h-12 w-12 rounded-lg overflow-hidden flex-shrink-0 border border-border">
@@ -51,34 +55,61 @@ export function ListingCard({ business }: ListingCardProps) {
               <h3 className="font-semibold text-sm leading-tight truncate group-hover:text-primary transition-colors">
                 {business.name}
               </h3>
-              {business.avg_rating !== undefined && business.review_count !== undefined && (
-                <div className="flex items-center gap-1 mt-0.5">
-                  <Star className="h-3 w-3 fill-primary text-primary" />
-                  <span className="text-xs font-medium">{business.avg_rating.toFixed(1)}</span>
-                  <span className="text-xs text-muted-foreground">({business.review_count})</span>
-                </div>
-              )}
+              {/* Tagline area always reserves two lines so the title
+                  block has a uniform height across cards regardless
+                  of whether a tagline is present. line-clamp-2 caps
+                  long taglines at the same height. */}
+              <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5 min-h-[2.25rem]">
+                {business.tagline ?? ''}
+              </p>
             </div>
           </div>
 
-          {business.tagline && (
-            <p className="text-xs text-muted-foreground line-clamp-2 mb-3">{business.tagline}</p>
-          )}
-
-          <div className="flex flex-wrap gap-1 mb-3">
-            {business.category_names?.slice(0, 2).map(name => (
-              <Badge key={name} variant="secondary" className="text-xs">{name}</Badge>
-            ))}
-          </div>
-
-          {(business.city || business.country) && (
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <MapPin className="h-3 w-3" />
-              <span>{[business.city, business.country].filter(Boolean).join(', ')}</span>
+          {business.category_names && business.category_names.length > 0 && (
+            <div className="flex flex-wrap gap-1 mb-3">
+              {business.category_names.slice(0, 2).map(name => (
+                <Badge key={name} variant="secondary" className="text-xs">{name}</Badge>
+              ))}
             </div>
           )}
+
+          {/* Footer row pinned to the bottom via mt-auto so location
+              + reviews align across cards even when the body content
+              above varies in height. */}
+          <div className="mt-auto flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            {(business.city || business.country) ? (
+              <div className="flex items-center gap-1 min-w-0">
+                <MapPin className="h-3 w-3 flex-shrink-0" />
+                <span className="truncate">
+                  {[business.city, business.country].filter(Boolean).join(', ')}
+                </span>
+              </div>
+            ) : (
+              <span />
+            )}
+            <ReviewBadge count={business.review_count} avg={business.avg_rating} />
+          </div>
         </div>
       </div>
     </Link>
+  )
+}
+
+/**
+ * Small "★ 4.6 (12)" or "No reviews" badge for the card footer.
+ * Always renders something so the footer row stays visually
+ * balanced — empty state shows a muted "No reviews yet" instead
+ * of leaving the slot blank.
+ */
+function ReviewBadge({ count, avg }: { count?: number; avg?: number }) {
+  if (count === undefined || count === 0 || avg === undefined) {
+    return <span className="text-[11px] text-muted-foreground/70 flex-shrink-0">No reviews</span>
+  }
+  return (
+    <div className="flex items-center gap-1 flex-shrink-0">
+      <Star className="h-3 w-3 fill-primary text-primary" />
+      <span className="font-medium text-foreground">{avg.toFixed(1)}</span>
+      <span className="text-muted-foreground">({count})</span>
+    </div>
   )
 }
