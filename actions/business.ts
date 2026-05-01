@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { uploadFile } from '@/lib/storage'
 import { refreshBusinessEmbedding } from '@/lib/ai/refresh-business-embedding'
 import { revalidatePath } from 'next/cache'
@@ -438,8 +439,40 @@ export async function deleteBusiness(
     return { error: `Type the business name exactly to confirm: "${biz.name}"` }
   }
 
-  const { error } = await db.from('businesses').delete().eq('id', id).eq('owner_id', user.id)
+  // Earlier this used the request-scoped (user) client to issue the
+  // DELETE. That works only when migration 012 (the DELETE RLS
+  // policy on businesses) has been applied. If the policy is
+  // missing, RLS silently filters every row out of the DELETE —
+  // PostgREST returns 200 OK with 0 rows affected, no error — and
+  // members see "deleted" toasts but the listing stays in their
+  // dashboard.
+  //
+  // Two-pronged fix:
+  //   1. Use the service-role client. Ownership has already been
+  //      verified above (matched id, owner_id, AND typed name), so
+  //      bypassing RLS for this admin-style delete is safe.
+  //   2. .select('id') after .delete() so we can count the rows the
+  //      delete actually affected. Zero rows → surface a clear
+  //      error instead of pretending success.
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return { error: 'Service role key not configured on the server. Contact the EO team.' }
+  }
+  const svc = createServiceClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+  )
+
+  const { data: deleted, error } = await svc
+    .from('businesses')
+    .delete()
+    .eq('id', id)
+    .eq('owner_id', biz.owner_id)
+    .select('id') as { data: Array<{ id: string }> | null; error: { message: string } | null }
   if (error) return { error: error.message }
+  if (!deleted || deleted.length === 0) {
+    return { error: 'Could not delete the business. Please contact the EO team.' }
+  }
 
   revalidatePath('/dashboard')
   revalidatePath('/dashboard/services')
