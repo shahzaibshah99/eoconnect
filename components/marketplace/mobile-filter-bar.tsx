@@ -124,11 +124,20 @@ export function MobileFilterBar({ categories }: MobileFilterBarProps) {
             {categories.map(cat => {
               const checked = selectedCategories.includes(cat.slug)
               return (
+                // base-ui Menu.Item fires `onClick` on selection and
+                // closes the menu by default. For the multi-select
+                // category list we want the menu to stay open while
+                // the user toggles several boxes, so closeOnClick is
+                // false. The earlier code attached handlers to
+                // `onSelect` (a React text-selection synthetic event
+                // — totally inert on menu items) which is why the
+                // user reported "filters open but nothing happens."
                 <DropdownMenuItem
                   key={cat.id}
-                  onSelect={(e) => { e.preventDefault(); toggleCategory(cat.slug) }}
+                  closeOnClick={false}
+                  onClick={() => toggleCategory(cat.slug)}
                 >
-                  <Checkbox checked={checked} className="mr-2" />
+                  <Checkbox checked={checked} className="mr-2 pointer-events-none" />
                   <span>{cat.icon} {cat.name}</span>
                 </DropdownMenuItem>
               )
@@ -136,8 +145,7 @@ export function MobileFilterBar({ categories }: MobileFilterBarProps) {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* REGION — single-select. Closing the dropdown on selection
-            is the right behaviour here. */}
+        {/* REGION — single-select. Default closeOnClick (true) is fine. */}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -147,11 +155,11 @@ export function MobileFilterBar({ categories }: MobileFilterBarProps) {
             }
           />
           <DropdownMenuContent align="start" className="w-64 max-h-72 overflow-y-auto">
-            <DropdownMenuItem onSelect={() => setRegion('')}>
+            <DropdownMenuItem onClick={() => setRegion('')}>
               <span className={cn(!selectedRegion && 'font-medium')}>Any region</span>
             </DropdownMenuItem>
             {REGIONS.map(r => (
-              <DropdownMenuItem key={r} onSelect={() => setRegion(r)}>
+              <DropdownMenuItem key={r} onClick={() => setRegion(r)}>
                 <span className={cn(selectedRegion === r && 'font-medium text-primary')}>{r}</span>
               </DropdownMenuItem>
             ))}
@@ -169,7 +177,7 @@ export function MobileFilterBar({ categories }: MobileFilterBarProps) {
           />
           <DropdownMenuContent align="start" className="w-44">
             {SORT_OPTIONS.map(o => (
-              <DropdownMenuItem key={o.value} onSelect={() => setSort(o.value)}>
+              <DropdownMenuItem key={o.value} onClick={() => setSort(o.value)}>
                 <span className={cn(selectedSort === o.value && 'font-medium text-primary')}>{o.label}</span>
               </DropdownMenuItem>
             ))}
