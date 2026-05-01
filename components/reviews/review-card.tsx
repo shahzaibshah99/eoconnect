@@ -7,12 +7,11 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
-  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
+  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { Star, ExternalLink, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -173,9 +172,11 @@ export function ReviewCard({ review, isListingOwner, isAdmin }: ReviewCardProps)
 function AdminActions({ review }: { review: ReviewCardItem }) {
   const router = useRouter()
   const [editOpen, setEditOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const [editRating, setEditRating] = useState(review.rating)
   const [editBody, setEditBody] = useState(review.body ?? '')
   const [editError, setEditError] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [isSaving, startSaving] = useTransition()
   const [isDeleting, startDeleting] = useTransition()
 
@@ -195,27 +196,29 @@ function AdminActions({ review }: { review: ReviewCardItem }) {
     })
   }
 
-  // The delete confirmation lives outside the dropdown — its trigger
-  // is rendered inline as a DropdownMenuItem, but the actual dialog
-  // sits at this scope so closing the dropdown doesn't tear it down.
-  // (DropdownMenuItem doesn't accept `asChild` in our base-ui version,
-  // so wrapping a ConfirmDialog directly inside isn't possible.)
-  const handleDelete = async () => {
-    return new Promise<void>((resolve, reject) => {
-      startDeleting(async () => {
-        const result = await deleteReview(review.id)
-        if (result.error) {
-          reject(new Error(result.error))
-          return
-        }
-        router.refresh()
-        resolve()
-      })
+  const handleDelete = () => {
+    setDeleteError(null)
+    startDeleting(async () => {
+      const result = await deleteReview(review.id)
+      if (result.error) {
+        setDeleteError(result.error)
+        return
+      }
+      setDeleteOpen(false)
+      router.refresh()
     })
   }
 
   return (
     <>
+      {/* The dropdown only sets which dialog opens. Both the Edit
+          and Delete dialogs live OUTSIDE the dropdown's portal so
+          they survive when the dropdown closes (which it does the
+          moment a menu item is selected). The previous attempt
+          rendered the delete ConfirmDialog INSIDE the dropdown —
+          and base-ui's portal teardown closed the dialog within a
+          frame, hence the user's "popup flashes for a millisecond
+          and vanishes" report. */}
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
@@ -232,21 +235,9 @@ function AdminActions({ review }: { review: ReviewCardItem }) {
           <DropdownMenuItem onSelect={() => setEditOpen(true)}>
             <Pencil className="mr-2 h-4 w-4" /> Edit
           </DropdownMenuItem>
-          {/* Delete trigger lives in the dropdown but the actual
-              ConfirmDialog is rendered below at component scope so
-              it isn't torn down when the dropdown closes. */}
-          <ConfirmDialog
-            trigger={
-              <DropdownMenuItem variant="destructive" onSelect={(e) => e.preventDefault()}>
-                <Trash2 className="mr-2 h-4 w-4" /> Delete
-              </DropdownMenuItem>
-            }
-            title="Delete this review?"
-            description="This permanently removes the review. The reviewer can submit a new one but the original text and rating are gone."
-            confirmLabel={isDeleting ? 'Deleting…' : 'Delete review'}
-            variant="destructive"
-            onConfirm={handleDelete}
-          />
+          <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
+            <Trash2 className="mr-2 h-4 w-4" /> Delete
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -292,6 +283,33 @@ function AdminActions({ review }: { review: ReviewCardItem }) {
             </Button>
             <Button type="button" onClick={handleSave} disabled={isSaving}>
               {isSaving ? 'Saving…' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation. Independent dialog at this scope so
+          the dropdown closing doesn't tear it down. */}
+      <Dialog open={deleteOpen} onOpenChange={(v) => { if (!isDeleting) setDeleteOpen(v) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete this review?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              This permanently removes the review. The reviewer can submit a new
+              one but the original text and rating are gone.
+            </p>
+            {deleteError && (
+              <Alert variant="destructive"><AlertDescription>{deleteError}</AlertDescription></Alert>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeleteOpen(false)} disabled={isDeleting}>
+              Cancel
+            </Button>
+            <Button type="button" variant="destructive" onClick={handleDelete} disabled={isDeleting}>
+              {isDeleting ? 'Deleting…' : 'Delete review'}
             </Button>
           </DialogFooter>
         </DialogContent>
