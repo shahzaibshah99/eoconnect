@@ -2,8 +2,11 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useTransition } from 'react'
-import { Settings, User, Menu } from 'lucide-react'
+import { useState, useTransition } from 'react'
+import { Settings, User, Menu, Megaphone } from 'lucide-react'
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 import { ThemeToggle } from './theme-toggle'
 import { Logo } from './logo'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -55,6 +58,11 @@ export function Navbar({
     : baseLinks
   const pathname = usePathname()
   const [isPending, startTransition] = useTransition()
+  // Andrew wanted a "Post a Need" entry on the nav to gauge interest for
+  // a future reverse-marketplace flow (members post needs, AI matches
+  // businesses). For now this is a placeholder — clicking opens a
+  // coming-soon dialog. No route, no server work.
+  const [postNeedOpen, setPostNeedOpen] = useState(false)
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background">
@@ -97,6 +105,15 @@ export function Navbar({
                   )
                 })}
                 <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={(e) => { e.preventDefault(); setPostNeedOpen(true) }}
+                  className="cursor-pointer"
+                >
+                  <span className="flex items-center gap-2 w-full">
+                    <Megaphone className="h-4 w-4" />
+                    Post a Need
+                  </span>
+                </DropdownMenuItem>
                 <DropdownMenuItem>
                   <Link href="/dashboard/services/new" className="flex items-center w-full text-primary font-medium">
                     + Add Service
@@ -139,6 +156,14 @@ export function Navbar({
                 </Link>
               )
             })}
+            <button
+              type="button"
+              onClick={() => setPostNeedOpen(true)}
+              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground hover:bg-muted"
+            >
+              <Megaphone className="h-4 w-4" />
+              Post a Need
+            </button>
           </nav>
         </div>
 
@@ -202,6 +227,21 @@ export function Navbar({
           </DropdownMenu>
         </div>
       </div>
+
+      <Dialog open={postNeedOpen} onOpenChange={setPostNeedOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+              <Megaphone className="h-6 w-6 text-primary" />
+            </div>
+            <DialogTitle className="text-center">Post a Need — Coming Soon</DialogTitle>
+            <DialogDescription className="text-center">
+              Soon you&apos;ll be able to post what you&apos;re looking for and we&apos;ll
+              notify members whose businesses match. Stay tuned.
+            </DialogDescription>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
     </header>
   )
 }
