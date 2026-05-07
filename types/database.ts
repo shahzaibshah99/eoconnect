@@ -10,6 +10,11 @@ export type AdFormat = 'banner' | 'sponsored_listing'
 export type AdStatus = 'draft' | 'pending_review' | 'active' | 'paused' | 'completed' | 'rejected'
 export type TeamSize = '1-10' | '11-50' | '51-200' | '201-500' | '500+'
 
+export type VerificationTag =
+  | 'unverified'
+  | 'eo_member' | 'eo_accelerator' | 'eo_alumni' | 'eo_sponsor'
+  | 'ypo_member' | 'ypo_alumni' | 'ypo_sponsor'
+
 export interface Profile {
   id: string
   full_name: string
@@ -21,6 +26,10 @@ export interface Profile {
   onboarded_at: string | null
   role: UserRole
   status: UserStatus
+  /** Member Market verification tag (migration 020). 'unverified' is the default. */
+  verification_tag: VerificationTag
+  /** 'eo' or 'ypo'. Drives tag vocabulary and tenant scoping. */
+  tenant_id: string
   created_at: string
   /** Timestamp of when the member last opened the notifications
    *  bell. Reviews on the member's listings created after this

@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { Users, Tags, MessageSquareWarning, Building2, Megaphone, LayoutDashboard } from 'lucide-react'
+import { Users, Tags, MessageSquareWarning, Building2, Megaphone, LayoutDashboard, ShieldCheck, History, MapPin, Upload, Flag, Star } from 'lucide-react'
 import { ADS_ENABLED } from '@/lib/feature-flags'
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -40,6 +40,32 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           <Link href="/admin/reviews" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-muted">
             <MessageSquareWarning className="h-4 w-4" /> Flagged Reviews
           </Link>
+          <Link href="/admin/flags" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-muted">
+            <Flag className="h-4 w-4" /> Flag review
+          </Link>
+          <Link href="/admin/imports" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-muted">
+            <Upload className="h-4 w-4" /> CSV imports
+          </Link>
+          {isSuper && (
+            <Link href="/admin/verifications" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-muted">
+              <ShieldCheck className="h-4 w-4" /> Verifications
+            </Link>
+          )}
+          {isSuper && (
+            <Link href="/admin/spotlight" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-muted">
+              <Star className="h-4 w-4" /> Spotlight
+            </Link>
+          )}
+          {isSuper && (
+            <Link href="/admin/chapters" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-muted">
+              <MapPin className="h-4 w-4" /> Chapters
+            </Link>
+          )}
+          {isSuper && (
+            <Link href="/admin/audit" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-muted">
+              <History className="h-4 w-4" /> Audit log
+            </Link>
+          )}
           {ADS_ENABLED && (
             <Link href="/admin/ads" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-muted">
               <Megaphone className="h-4 w-4" /> Ad Approvals

@@ -201,6 +201,90 @@ export function adRejectedEmail(businessName: string, reason: string, siteUrl: s
   }
 }
 
+// ── Verification lifecycle ──────────────────────────────────
+//
+// Members move through: submit → admin reviews → approved | rejected |
+// resubmit. Each transition fires a transactional email so the member
+// has a record they can act on without logging in.
+
+export function verificationSubmittedEmail(name: string, siteUrl: string) {
+  return {
+    subject: 'We got your verification submission',
+    html: wrap('Verification submitted', `
+      <h1 style="font-size:18px;margin:0 0 12px;">Thanks ${escapeHtml(name)}, we got your submission</h1>
+      <p style="font-size:14px;color:#444;line-height:1.5;">
+        An admin will review your screenshot and any supporting signals. Most submissions are reviewed within
+        a few business days. We&apos;ll email you the moment your status changes.
+      </p>
+      <p style="margin-top:20px;">
+        <a href="${siteUrl}/dashboard/verify" style="background:#0A2218;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;">
+          View status
+        </a>
+      </p>
+    `)
+  }
+}
+
+export function verificationApprovedEmail(name: string, tagLabel: string, siteUrl: string) {
+  return {
+    subject: `You're verified — ${tagLabel}`,
+    html: wrap('Verified', `
+      <h1 style="font-size:18px;margin:0 0 12px;">${escapeHtml(name)}, you&apos;re verified</h1>
+      <p style="font-size:14px;color:#444;line-height:1.5;">
+        Your member profile now carries the <strong>${escapeHtml(tagLabel)}</strong> tag.
+        Listings you publish inherit the tag and earn tier-based search ranking across the marketplace.
+      </p>
+      <p style="margin-top:20px;">
+        <a href="${siteUrl}/dashboard" style="background:#0A2218;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;">
+          Go to dashboard
+        </a>
+      </p>
+    `)
+  }
+}
+
+export function verificationRejectedEmail(name: string, reason: string, siteUrl: string) {
+  return {
+    subject: 'Your verification needs another look',
+    html: wrap('Verification rejected', `
+      <h1 style="font-size:18px;margin:0 0 12px;">Hi ${escapeHtml(name)} — your submission wasn&apos;t approved</h1>
+      <p style="font-size:14px;color:#444;line-height:1.5;"><strong>Reason:</strong></p>
+      <blockquote style="border-left:3px solid #B86800;padding:8px 16px;margin:8px 0 16px;background:#fdf3e3;font-size:14px;color:#333;">
+        ${escapeHtml(reason)}
+      </blockquote>
+      <p style="font-size:14px;color:#444;line-height:1.5;">
+        You can submit again with updated info whenever you&apos;re ready.
+      </p>
+      <p style="margin-top:20px;">
+        <a href="${siteUrl}/dashboard/verify" style="background:#0A2218;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;">
+          Try again
+        </a>
+      </p>
+    `)
+  }
+}
+
+export function verificationResubmitEmail(name: string, note: string, siteUrl: string) {
+  return {
+    subject: 'Please resubmit your verification',
+    html: wrap('Resubmission requested', `
+      <h1 style="font-size:18px;margin:0 0 12px;">Hi ${escapeHtml(name)} — we need an updated submission</h1>
+      <p style="font-size:14px;color:#444;line-height:1.5;"><strong>What to update:</strong></p>
+      <blockquote style="border-left:3px solid #1A3F6F;padding:8px 16px;margin:8px 0 16px;background:#e4edf8;font-size:14px;color:#333;">
+        ${escapeHtml(note)}
+      </blockquote>
+      <p style="font-size:14px;color:#444;line-height:1.5;">
+        Make the change and submit again — your previous submission is on file.
+      </p>
+      <p style="margin-top:20px;">
+        <a href="${siteUrl}/dashboard/verify" style="background:#0A2218;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;">
+          Update submission
+        </a>
+      </p>
+    `)
+  }
+}
+
 /**
  * Support inquiry from a signed-in member. Goes to support@member.market.
  * Always includes a member-context block (id / name / email / chapter) so

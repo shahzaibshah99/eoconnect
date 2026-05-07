@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState, useTransition } from 'react'
-import { Settings, User, Menu, Megaphone } from 'lucide-react'
+import { Settings, User, Menu, Megaphone, ShieldAlert, ShieldCheck } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
@@ -210,6 +210,19 @@ export function Navbar({
                   <Settings className="mr-2 h-4 w-4" />My Businesses
                 </Link>
               </DropdownMenuItem>
+              {profile && profile.verification_tag === 'unverified' ? (
+                <DropdownMenuItem>
+                  <Link href="/dashboard/verify" className="flex items-center w-full text-yellow-700 dark:text-yellow-400">
+                    <ShieldAlert className="mr-2 h-4 w-4" />Verify membership
+                  </Link>
+                </DropdownMenuItem>
+              ) : profile && profile.verification_tag !== 'unverified' && (
+                <DropdownMenuItem>
+                  <Link href="/dashboard/verify" className="flex items-center w-full">
+                    <ShieldCheck className="mr-2 h-4 w-4" />Verification status
+                  </Link>
+                </DropdownMenuItem>
+              )}
               {profile?.role && ['chapter_admin', 'super_admin'].includes(profile.role) && (
                 <DropdownMenuItem>
                   <Link href="/admin" className="flex items-center w-full">Admin Panel</Link>

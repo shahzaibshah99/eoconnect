@@ -5,6 +5,15 @@ import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { isInChapterScope } from '@/lib/chapter-scope'
+import { isAssignableTag, VERIFICATION_TAG_LABEL, type AssignableTag } from '@/lib/verification-tags'
+import {
+  sendEmail,
+  verificationApprovedEmail,
+  verificationRejectedEmail,
+  verificationResubmitEmail,
+} from '@/lib/email/send'
+import { siteUrl } from '@/lib/site-url'
+import { currentTenant } from '@/lib/tenant'
 
 // Service-role client for operations that need to bypass RLS
 // (writing to other users' profile rows).
@@ -130,8 +139,13 @@ export async function createCategory(formData: FormData): Promise<{ error: strin
   })
   if (!parsed.success) return { error: parsed.error.issues[0].message }
 
-  const { error } = await ctx.db.from('categories').insert({ ...parsed.data, active: true })
+  const { data: inserted, error } = await ctx.db
+    .from('categories')
+    .insert({ ...parsed.data, active: true })
+    .select('id')
+    .maybeSingle() as { data: { id: string } | null; error: { message: string } | null }
   if (error) return { error: error.message }
+  await logEvent(adminDb(), 'category_created', ctx.user!.id, inserted?.id ?? null, parsed.data)
   revalidatePath('/admin/categories')
   revalidatePath('/marketplace')
   return { error: null }
@@ -152,6 +166,7 @@ export async function updateCategory(id: string, formData: FormData): Promise<{ 
 
   const { error } = await ctx.db.from('categories').update(parsed.data).eq('id', id)
   if (error) return { error: error.message }
+  await logEvent(adminDb(), 'category_updated', ctx.user!.id, id, parsed.data)
   revalidatePath('/admin/categories')
   return { error: null }
 }
@@ -163,6 +178,7 @@ export async function toggleCategoryActive(id: string, active: boolean): Promise
 
   const { error } = await ctx.db.from('categories').update({ active }).eq('id', id)
   if (error) return { error: error.message }
+  await logEvent(adminDb(), active ? 'category_activated' : 'category_deactivated', ctx.user!.id, id, { active })
   revalidatePath('/admin/categories')
   revalidatePath('/marketplace')
   return { error: null }
@@ -193,6 +209,7 @@ export async function setMemberStatus(
     .select('id')
   if (error) return { error: error.message }
   if (!data || data.length === 0) return { error: 'No profile updated — user not found' }
+  await logEvent(svc, 'member_status_changed', ctx.user!.id, userId, { status })
   revalidatePath('/admin/members')
   return { error: null }
 }
@@ -211,13 +228,15 @@ export async function setMemberRole(
   // Service-role write: profile RLS blocks super-admins from updating
   // other users' rows, and the user-scoped client silently no-ops
   // (0 rows affected, no error). Bypass RLS for this admin action.
-  const { data, error } = await adminDb()
+  const svc = adminDb()
+  const { data, error } = await svc
     .from('profiles')
     .update({ role })
     .eq('id', userId)
     .select('id')
   if (error) return { error: error.message }
   if (!data || data.length === 0) return { error: 'No profile updated — user not found' }
+  await logEvent(svc, 'member_role_changed', ctx.user!.id, userId, { role })
   revalidatePath('/admin/members')
   return { error: null }
 }
@@ -244,6 +263,7 @@ export async function unflagReview(id: string): Promise<{ error: string | null }
 
   const { error } = await svc.from('reviews').update({ flagged: false }).eq('id', id)
   if (error) return { error: error.message }
+  await logEvent(svc, 'review_unflagged', ctx.user!.id, id, {})
   revalidatePath('/admin/reviews')
   return { error: null }
 }
@@ -265,8 +285,13 @@ export async function deleteReview(id: string): Promise<{ error: string | null }
     }
   }
 
+  // Look up business id BEFORE the delete for log context. After delete
+  // the FK trail is gone — capture it now.
+  const businessId = await reviewBusinessId(svc, id)
+
   const { error } = await svc.from('reviews').delete().eq('id', id)
   if (error) return { error: error.message }
+  await logEvent(svc, 'review_deleted', ctx.user!.id, id, { business_id: businessId })
   revalidatePath('/admin/reviews')
   // Listing pages cache the review list — bust them too so the admin
   // delete shows up immediately on the public-facing page.
@@ -356,6 +381,7 @@ export async function setBusinessStatusAdmin(
 
   const { error } = await svc.from('businesses').update(updateData).eq('id', id)
   if (error) return { error: error.message }
+  await logEvent(svc, 'business_status_changed', ctx.user!.id, id, { status })
   revalidatePath('/admin/listings')
   revalidatePath('/marketplace')
   // Also bust the owner's dashboard caches — without these, after admin
@@ -412,6 +438,7 @@ export async function deleteBusinessAdmin(
 
   const { error } = await svc.from('businesses').delete().eq('id', id)
   if (error) return { error: error.message }
+  await logEvent(svc, 'business_deleted', ctx.user!.id, id, { name: biz.name })
 
   revalidatePath('/admin/listings')
   revalidatePath('/marketplace')
@@ -515,6 +542,11 @@ export async function transferBusinessOwnership(
     .update({ owner_id: newOwnerId })
     .eq('id', businessId)
   if (error) return { error: error.message }
+  await logEvent(svc, 'business_ownership_transferred', ctx.user!.id, businessId, {
+    name: biz.name,
+    old_owner_id: biz.owner_id,
+    new_owner_id: newOwnerId,
+  })
 
   revalidatePath('/admin/listings')
   revalidatePath('/marketplace')
@@ -539,7 +571,8 @@ export async function setChapterAdminScope(
     return { error: 'SUPABASE_SERVICE_ROLE_KEY not configured on the server' }
   }
 
-  const { data, error } = await adminDb()
+  const svc = adminDb()
+  const { data, error } = await svc
     .from('profiles')
     .update({
       admin_scope_country: scope.country || null,
@@ -549,6 +582,280 @@ export async function setChapterAdminScope(
     .select('id')
   if (error) return { error: error.message }
   if (!data || data.length === 0) return { error: 'No profile updated — user not found' }
+  await logEvent(svc, 'chapter_admin_scope_set', ctx.user!.id, userId, {
+    country: scope.country ?? null,
+    city: scope.city ?? null,
+  })
   revalidatePath('/admin/members')
+  return { error: null }
+}
+
+// ── Verification queue (super_admin only) ────────────────────
+//
+// Per scope doc F15: App Admin reviews verification submissions, sees
+// LinkedIn pre-validation signal alongside, and assigns the verification
+// tag on approval. Approval cascades the tag to the member's owned
+// businesses so search ranking reflects it everywhere.
+//
+// Chapter admins are intentionally NOT permitted here — verification is
+// a platform-wide trust signal, not a chapter-scoped action.
+
+async function requireSuperAdmin() {
+  const ctx = await requireAdmin()
+  if (ctx.error) return { ...ctx, ok: false as const }
+  if (ctx.role !== 'super_admin') {
+    return { ...ctx, ok: false as const, error: 'Super admin only' as const }
+  }
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return { ...ctx, ok: false as const, error: 'SUPABASE_SERVICE_ROLE_KEY not configured on the server' as const }
+  }
+  return { ...ctx, ok: true as const }
+}
+
+async function logEvent(
+  svc: ReturnType<typeof adminDb>,
+  type: string,
+  adminId: string,
+  entityId: string | null,
+  metadata: Record<string, unknown>,
+  tenantId?: string
+) {
+  const tenant = tenantId ?? currentTenant()
+  // Best-effort audit log — never block the action if this insert fails
+  // (e.g. transient DB blip). The action result is what matters; the
+  // audit row is supplementary.
+  try {
+    await svc.from('events_log').insert({
+      type,
+      member_id: adminId,
+      entity_id: entityId,
+      metadata,
+      tenant_id: tenant,
+    })
+  } catch {
+    // swallow
+  }
+}
+
+/**
+ * Look up a member's display name + delivery email for transactional
+ * mail. Falls back to auth email when eo_membership_email is missing
+ * (some pre-populated profiles won't have it set).
+ */
+async function getMemberContact(
+  svc: ReturnType<typeof adminDb>,
+  memberId: string
+): Promise<{ email: string | null; name: string }> {
+  const { data: profile } = await svc
+    .from('profiles')
+    .select('full_name, eo_membership_email')
+    .eq('id', memberId)
+    .maybeSingle() as { data: { full_name: string | null; eo_membership_email: string | null } | null }
+
+  let email = profile?.eo_membership_email ?? null
+  if (!email) {
+    // Fall back to the auth.users record. Service role can read it.
+    const { data: auth } = await svc.auth.admin.getUserById(memberId)
+    email = auth?.user?.email ?? null
+  }
+  return { email, name: profile?.full_name ?? 'there' }
+}
+
+export async function approveVerification(
+  verificationId: string,
+  tag: AssignableTag
+): Promise<{ error: string | null }> {
+  const ctx = await requireSuperAdmin()
+  if (!ctx.ok) return { error: ctx.error ?? 'Not authorized' }
+  if (!isAssignableTag(tag)) return { error: 'Invalid verification tag' }
+
+  const svc = adminDb()
+
+  // Fetch the verification to learn the member and tenant. Need both for
+  // the cascade write and for events_log tenant scoping.
+  const { data: row } = await svc
+    .from('verifications')
+    .select('id, member_id, tenant_id, status')
+    .eq('id', verificationId)
+    .maybeSingle() as { data: { id: string; member_id: string; tenant_id: string; status: string } | null }
+  if (!row) return { error: 'Verification not found' }
+  if (row.status === 'approved') return { error: 'Already approved' }
+
+  // Tag must match the member's tenant — refuse cross-tenant assignments
+  // (e.g. assigning ypo_member to an EO member).
+  const tagPrefix = tag.startsWith('eo_') ? 'eo' : 'ypo'
+  if (tagPrefix !== row.tenant_id) {
+    return { error: `Tag ${tag} does not match member tenant ${row.tenant_id}` }
+  }
+
+  // 1. Mark the verification approved.
+  const { error: vErr } = await svc
+    .from('verifications')
+    .update({
+      status: 'approved',
+      reviewed_by: ctx.user!.id,
+      reviewed_at: new Date().toISOString(),
+      rejection_reason: null,
+    })
+    .eq('id', verificationId)
+  if (vErr) return { error: vErr.message }
+
+  // 2. Stamp the tag on the member's profile.
+  const { error: pErr } = await svc
+    .from('profiles')
+    .update({ verification_tag: tag })
+    .eq('id', row.member_id)
+  if (pErr) return { error: pErr.message }
+
+  // 3. Cascade tag to all of the member's owned businesses so search
+  //    ranking sees the right tier. Per F02 in the scope doc.
+  const { error: bErr } = await svc
+    .from('businesses')
+    .update({ verification_tag: tag })
+    .eq('owner_id', row.member_id)
+  if (bErr) return { error: bErr.message }
+
+  await logEvent(svc, 'verification_approved', ctx.user!.id, verificationId, {
+    member_id: row.member_id,
+    tag,
+  }, row.tenant_id)
+
+  // Notify member. Best-effort — email failure must not roll back the
+  // approval that has already been written to all three tables above.
+  const contact = await getMemberContact(svc, row.member_id)
+  if (contact.email) {
+    const tpl = verificationApprovedEmail(contact.name, VERIFICATION_TAG_LABEL[tag], siteUrl())
+    sendEmail({ to: contact.email, subject: tpl.subject, html: tpl.html }).catch(err => {
+      console.error('verification approved email failed:', err)
+    })
+  }
+
+  revalidatePath('/admin/verifications')
+  revalidatePath('/admin/members')
+  revalidatePath('/marketplace')
+  return { error: null }
+}
+
+const RejectSchema = z.object({
+  reason: z.string().trim().min(3, 'Reason is required').max(500),
+})
+
+export async function rejectVerification(
+  verificationId: string,
+  reason: string
+): Promise<{ error: string | null }> {
+  const ctx = await requireSuperAdmin()
+  if (!ctx.ok) return { error: ctx.error ?? 'Not authorized' }
+
+  const parsed = RejectSchema.safeParse({ reason })
+  if (!parsed.success) return { error: parsed.error.issues[0].message }
+
+  const svc = adminDb()
+  const { data: row } = await svc
+    .from('verifications')
+    .select('id, member_id, tenant_id, status')
+    .eq('id', verificationId)
+    .maybeSingle() as { data: { id: string; member_id: string; tenant_id: string; status: string } | null }
+  if (!row) return { error: 'Verification not found' }
+
+  const { error } = await svc
+    .from('verifications')
+    .update({
+      status: 'rejected',
+      rejection_reason: parsed.data.reason,
+      reviewed_by: ctx.user!.id,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq('id', verificationId)
+  if (error) return { error: error.message }
+
+  await logEvent(svc, 'verification_rejected', ctx.user!.id, verificationId, {
+    member_id: row.member_id,
+    reason: parsed.data.reason,
+  }, row.tenant_id)
+
+  const contact = await getMemberContact(svc, row.member_id)
+  if (contact.email) {
+    const tpl = verificationRejectedEmail(contact.name, parsed.data.reason, siteUrl())
+    sendEmail({ to: contact.email, subject: tpl.subject, html: tpl.html }).catch(err => {
+      console.error('verification rejected email failed:', err)
+    })
+  }
+
+  revalidatePath('/admin/verifications')
+  return { error: null }
+}
+
+export async function requestVerificationResubmission(
+  verificationId: string,
+  note: string
+): Promise<{ error: string | null }> {
+  const ctx = await requireSuperAdmin()
+  if (!ctx.ok) return { error: ctx.error ?? 'Not authorized' }
+
+  // Note doubles as guidance to the member — same validation as reject reason.
+  const parsed = RejectSchema.safeParse({ reason: note })
+  if (!parsed.success) return { error: parsed.error.issues[0].message }
+
+  const svc = adminDb()
+  const { data: row } = await svc
+    .from('verifications')
+    .select('id, member_id, tenant_id, status')
+    .eq('id', verificationId)
+    .maybeSingle() as { data: { id: string; member_id: string; tenant_id: string; status: string } | null }
+  if (!row) return { error: 'Verification not found' }
+
+  const { error } = await svc
+    .from('verifications')
+    .update({
+      status: 'resubmit',
+      rejection_reason: parsed.data.reason,
+      reviewed_by: ctx.user!.id,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq('id', verificationId)
+  if (error) return { error: error.message }
+
+  await logEvent(svc, 'verification_resubmit_requested', ctx.user!.id, verificationId, {
+    member_id: row.member_id,
+    note: parsed.data.reason,
+  }, row.tenant_id)
+
+  const contact = await getMemberContact(svc, row.member_id)
+  if (contact.email) {
+    const tpl = verificationResubmitEmail(contact.name, parsed.data.reason, siteUrl())
+    sendEmail({ to: contact.email, subject: tpl.subject, html: tpl.html }).catch(err => {
+      console.error('verification resubmit email failed:', err)
+    })
+  }
+
+  revalidatePath('/admin/verifications')
+  return { error: null }
+}
+
+/**
+ * Manually set the LinkedIn signal value on a verification row. Used
+ * when the automated scrape couldn't run or returned a value the admin
+ * wants to override after eyeballing the LinkedIn URL themselves.
+ *
+ * The scrape itself runs out-of-band (worker / cron) and writes the same
+ * column; this is just the admin override path.
+ */
+export async function setVerificationLinkedInSignal(
+  verificationId: string,
+  signal: 'yes' | 'no' | 'unclear' | null
+): Promise<{ error: string | null }> {
+  const ctx = await requireSuperAdmin()
+  if (!ctx.ok) return { error: ctx.error ?? 'Not authorized' }
+
+  const svc = adminDb()
+  const { error } = await svc
+    .from('verifications')
+    .update({ linkedin_signal: signal })
+    .eq('id', verificationId)
+  if (error) return { error: error.message }
+  await logEvent(svc, 'verification_linkedin_signal_set', ctx.user!.id, verificationId, { signal })
+
+  revalidatePath('/admin/verifications')
   return { error: null }
 }
