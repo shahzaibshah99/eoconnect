@@ -225,6 +225,50 @@ export function verificationSubmittedEmail(name: string, siteUrl: string) {
   }
 }
 
+/**
+ * Admin notification when a member submits a new verification.
+ * Sent to every super_admin so somebody picks it up — the queue page
+ * is the source of truth, this email is just a heads-up.
+ */
+export function verificationPendingAdminEmail(input: {
+  memberName: string
+  memberEmail: string | null
+  memberChapter: string | null
+  hasLinkedIn: boolean
+  siteUrl: string
+}) {
+  const { memberName, memberEmail, memberChapter, hasLinkedIn, siteUrl } = input
+  return {
+    subject: `New verification submission: ${memberName}`,
+    html: wrap('New verification awaiting review', `
+      <h1 style="font-size:18px;margin:0 0 12px;">New verification needs review</h1>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:13px;">
+        <tr>
+          <td style="padding:6px 8px;background:#fafafa;color:#666;width:120px;">Member</td>
+          <td style="padding:6px 8px;background:#fafafa;"><strong>${escapeHtml(memberName)}</strong></td>
+        </tr>
+        ${memberEmail ? `<tr>
+          <td style="padding:6px 8px;color:#666;">Email</td>
+          <td style="padding:6px 8px;">${escapeHtml(memberEmail)}</td>
+        </tr>` : ''}
+        ${memberChapter ? `<tr>
+          <td style="padding:6px 8px;background:#fafafa;color:#666;">Chapter</td>
+          <td style="padding:6px 8px;background:#fafafa;">${escapeHtml(memberChapter)}</td>
+        </tr>` : ''}
+        <tr>
+          <td style="padding:6px 8px;color:#666;">LinkedIn URL</td>
+          <td style="padding:6px 8px;">${hasLinkedIn ? 'Provided · auto-scrape running' : 'Not provided'}</td>
+        </tr>
+      </table>
+      <p style="margin-top:20px;">
+        <a href="${siteUrl}/admin/verifications" style="background:#0A2218;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;">
+          Open verification queue
+        </a>
+      </p>
+    `)
+  }
+}
+
 export function verificationApprovedEmail(name: string, tagLabel: string, siteUrl: string) {
   return {
     subject: `You're verified — ${tagLabel}`,
@@ -280,6 +324,94 @@ export function verificationResubmitEmail(name: string, note: string, siteUrl: s
         <a href="${siteUrl}/dashboard/verify" style="background:#0A2218;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;">
           Update submission
         </a>
+      </p>
+    `)
+  }
+}
+
+// ── Verification grace period reminders ──────────────────────
+//
+// Per scope F01: members get nudged before their verification grace
+// expires (14 days for member-initiated, 60 days for pre-populated).
+// After expiry the listing stays live but ranks last — the reminders
+// are the last chance to avoid that.
+
+export function verificationReminderDay7Email(name: string, daysLeft: number, siteUrl: string) {
+  return {
+    subject: `Don't lose your member ranking — ${daysLeft} days to verify`,
+    html: wrap('Verification reminder', `
+      <h1 style="font-size:18px;margin:0 0 12px;">Hi ${escapeHtml(name)} — your verification is still pending</h1>
+      <p style="font-size:14px;color:#444;line-height:1.5;">
+        You haven&apos;t submitted a verification yet. Members who don&apos;t verify within 14 days drop to
+        the bottom of search results, which means fewer eyes on your business.
+      </p>
+      <p style="font-size:14px;color:#444;line-height:1.5;">
+        It takes about 2 minutes — upload a screenshot of your member profile page and you&apos;re done.
+      </p>
+      <p style="margin-top:20px;">
+        <a href="${siteUrl}/dashboard/verify" style="background:#0A2218;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;">
+          Verify now
+        </a>
+      </p>
+      <p style="font-size:12px;color:#888;margin-top:16px;">
+        ${daysLeft} day${daysLeft === 1 ? '' : 's'} left in your grace period.
+      </p>
+    `)
+  }
+}
+
+export function verificationReminderFinalEmail(name: string, siteUrl: string) {
+  return {
+    subject: 'Final reminder — verify your membership tomorrow',
+    html: wrap('Final verification reminder', `
+      <h1 style="font-size:18px;margin:0 0 12px;">Last chance, ${escapeHtml(name)}</h1>
+      <p style="font-size:14px;color:#444;line-height:1.5;">
+        Your verification grace period ends tomorrow. After that, your listings stay live but drop to
+        the bottom of search results until you&apos;re verified.
+      </p>
+      <p style="margin-top:20px;">
+        <a href="${siteUrl}/dashboard/verify" style="background:#B86800;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;">
+          Verify now
+        </a>
+      </p>
+    `)
+  }
+}
+
+export function verificationGraceExpiredEmail(name: string, siteUrl: string) {
+  return {
+    subject: 'Your verification grace period has ended',
+    html: wrap('Grace period ended', `
+      <h1 style="font-size:18px;margin:0 0 12px;">Hi ${escapeHtml(name)} — your grace period has ended</h1>
+      <p style="font-size:14px;color:#444;line-height:1.5;">
+        Your listings are still live, but they now rank below all verified members in search.
+        You can still verify any time to restore your ranking.
+      </p>
+      <p style="margin-top:20px;">
+        <a href="${siteUrl}/dashboard/verify" style="background:#0A2218;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;">
+          Verify now
+        </a>
+      </p>
+    `)
+  }
+}
+
+export function claimReminderEmail(name: string, businessName: string, daysLeft: number, claimUrl: string) {
+  return {
+    subject: `Claim your Member Market profile — ${businessName}`,
+    html: wrap('Claim your profile', `
+      <h1 style="font-size:18px;margin:0 0 12px;">Hi ${escapeHtml(name)} — your profile is waiting</h1>
+      <p style="font-size:14px;color:#444;line-height:1.5;">
+        We&apos;ve pre-populated a Member Market listing for <strong>${escapeHtml(businessName)}</strong>.
+        Claim it to take ownership, edit the details, and start receiving inquiries from fellow EO members.
+      </p>
+      <p style="margin-top:20px;">
+        <a href="${claimUrl}" style="background:#0A2218;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;">
+          Claim your profile
+        </a>
+      </p>
+      <p style="font-size:12px;color:#888;margin-top:16px;">
+        ${daysLeft > 0 ? `${daysLeft} day${daysLeft === 1 ? '' : 's'} left to claim.` : 'Claim window has expired but your listing remains live.'}
       </p>
     `)
   }

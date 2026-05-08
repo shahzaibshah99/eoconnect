@@ -47,18 +47,19 @@ async function logEvent(
   entityId: string | null,
   metadata: Record<string, unknown>
 ) {
-  // Best-effort audit insertion — same pattern as actions/admin.ts. A
-  // failed log row must never block the chapter mutation that triggered it.
-  try {
-    await svc.from('events_log').insert({
-      type,
-      member_id: adminId,
-      entity_id: entityId,
-      metadata,
-      tenant_id: currentTenant(),
-    })
-  } catch {
-    // swallow
+  // Best-effort audit insertion — a failed log row must never block the
+  // chapter mutation that triggered it, but we DO surface the error in
+  // server logs. Silent-swallow hid a uuid/bigint type mismatch for chapter
+  // events for several days; future regressions should be loud, not silent.
+  const { error } = await svc.from('events_log').insert({
+    type,
+    member_id: adminId,
+    entity_id: entityId,
+    metadata,
+    tenant_id: currentTenant(),
+  })
+  if (error) {
+    console.error(`[audit] events_log insert failed for type=${type}:`, error.message, { metadata })
   }
 }
 
@@ -107,7 +108,11 @@ export async function assignChapterManager(
     return { error: error.message }
   }
 
-  await logEvent(svc, 'chapter_manager_assigned', ctx.user!.id, String(chapterId), {
+  // events_log.entity_id is uuid — chapter ids are bigint, so keep
+  // them in metadata and pass null for entity_id. The audit page
+  // surfaces chapter context from metadata anyway.
+  await logEvent(svc, 'chapter_manager_assigned', ctx.user!.id, null, {
+    chapter_id: chapterId,
     chapter_name: chapter.name,
     member_id: memberId,
     member_name: member.full_name,
@@ -140,7 +145,8 @@ export async function removeChapterManager(
     .eq('id', assignmentId)
   if (error) return { error: error.message }
 
-  await logEvent(svc, 'chapter_manager_removed', ctx.user!.id, String(row.chapter_id), {
+  await logEvent(svc, 'chapter_manager_removed', ctx.user!.id, null, {
+    chapter_id: row.chapter_id,
     member_id: row.member_id,
     assignment_id: assignmentId,
   })
@@ -176,7 +182,8 @@ export async function setChapterSponsorSlots(
   if (error) return { error: error.message }
   if (!data) return { error: 'Chapter not found' }
 
-  await logEvent(svc, 'chapter_sponsor_slots_set', ctx.user!.id, String(chapterId), {
+  await logEvent(svc, 'chapter_sponsor_slots_set', ctx.user!.id, null, {
+    chapter_id: chapterId,
     chapter_name: data.name,
     slots: parsed.data.slots,
   })

@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/backfill-embeddings",
       "schedule": "13 3 * * *"
+    },
+    {
+      "path": "/api/cron/verification-reminders",
+      "schedule": "13 9 * * *"
     }
   ]
 }

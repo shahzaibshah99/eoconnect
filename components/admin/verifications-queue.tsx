@@ -8,6 +8,7 @@ import {
   rejectVerification,
   requestVerificationResubmission,
   setVerificationLinkedInSignal,
+  rescrapeLinkedInSignal,
 } from '@/actions/admin'
 import {
   assignableTagsForTenant,
@@ -23,7 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { format, formatDistanceToNow } from 'date-fns'
-import { Briefcase, ImageIcon, ExternalLink, Check, X, RotateCcw } from 'lucide-react'
+import { Briefcase, ImageIcon, ExternalLink, Check, X, RotateCcw, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 type Status = 'pending' | 'approved' | 'rejected' | 'resubmit'
@@ -50,6 +51,15 @@ export interface VerificationRow {
     verification_tag: VerificationTag
     tenant_id: string
   } | null
+  /** Chapter Manager endorsements of this member — supporting trust
+   *  signal beyond the screenshot + LinkedIn check. Per scope F01. */
+  cm_endorsements?: Array<{
+    id: string
+    chapter_name: string | null
+    endorser_name: string | null
+    note: string | null
+    created_at: string
+  }>
 }
 
 const STATUS_VARIANTS: Record<Status, string> = {
@@ -185,6 +195,22 @@ function VerificationItem({ row }: { row: VerificationRow }) {
                 <span className="font-medium">Last note:</span> {row.rejection_reason}
               </p>
             )}
+            {row.cm_endorsements && row.cm_endorsements.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {row.cm_endorsements.map(e => (
+                  <div
+                    key={e.id}
+                    className="text-xs p-2 rounded-md bg-green-500/5 border border-green-500/20"
+                  >
+                    <p className="font-medium text-green-700 dark:text-green-400">
+                      ✓ Endorsed as in-chapter by {e.endorser_name ?? 'a Chapter Manager'}
+                      {e.chapter_name && ` of ${e.chapter_name}`}
+                    </p>
+                    {e.note && <p className="text-muted-foreground mt-0.5 italic">&ldquo;{e.note}&rdquo;</p>}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -287,11 +313,19 @@ function VerificationItem({ row }: { row: VerificationRow }) {
 function LinkedInSignalRow({ row }: { row: VerificationRow }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+  const [isRescraping, startRescrape] = useTransition()
   const signal = row.linkedin_signal
 
   const setSignal = (s: NonNullable<LinkedInSignal>) => {
     startTransition(async () => {
       await setVerificationLinkedInSignal(row.id, s)
+      router.refresh()
+    })
+  }
+
+  const rescrape = () => {
+    startRescrape(async () => {
+      await rescrapeLinkedInSignal(row.id)
       router.refresh()
     })
   }
@@ -305,6 +339,23 @@ function LinkedInSignalRow({ row }: { row: VerificationRow }) {
         </Badge>
       ) : (
         <span className="text-muted-foreground italic">not checked</span>
+      )}
+      {/* Auto-scrape re-trigger — useful when the submit-time scrape failed
+          (RapidAPI down, key missing) or after the member updates LinkedIn. */}
+      {row.linkedin_url && (
+        <button
+          type="button"
+          onClick={rescrape}
+          disabled={isRescraping}
+          className={cn(
+            'h-5 px-1.5 rounded text-[10px] border border-border inline-flex items-center gap-1 hover:bg-muted',
+            isRescraping && 'opacity-50 cursor-not-allowed'
+          )}
+          title="Re-run LinkedIn auto-scrape"
+        >
+          <RefreshCw className={cn('h-2.5 w-2.5', isRescraping && 'animate-spin')} />
+          {isRescraping ? 'scraping…' : 'rescan'}
+        </button>
       )}
       {/* Manual override — admin can set/correct after eyeballing the URL. */}
       <div className="flex gap-0.5">

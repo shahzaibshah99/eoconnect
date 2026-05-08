@@ -36,6 +36,9 @@ interface NavbarProps {
    *  so the realtime channel can client-filter incoming review inserts
    *  to only those for the user's listings. */
   ownedBusinessIds?: string[]
+  /** True if the user has at least one row in `chapter_managers`. Drives
+   *  the "Chapter Manager Panel" entry in the user dropdown. */
+  isChapterManager?: boolean
   adsEnabled?: boolean
 }
 
@@ -51,6 +54,7 @@ export function Navbar({
   unreadNotifications = 0,
   recentNotifications = [],
   ownedBusinessIds = [],
+  isChapterManager = false,
   adsEnabled = false,
 }: NavbarProps) {
   const navLinks = adsEnabled
@@ -221,6 +225,11 @@ export function Navbar({
                   <Link href="/dashboard/verify" className="flex items-center w-full">
                     <ShieldCheck className="mr-2 h-4 w-4" />Verification status
                   </Link>
+                </DropdownMenuItem>
+              )}
+              {isChapterManager && (
+                <DropdownMenuItem>
+                  <Link href="/chapter-manager" className="flex items-center w-full">Chapter Manager Panel</Link>
                 </DropdownMenuItem>
               )}
               {profile?.role && ['chapter_admin', 'super_admin'].includes(profile.role) && (

@@ -39,16 +39,18 @@ async function logEvent(
   entityId: string | null,
   metadata: Record<string, unknown>
 ) {
-  try {
-    await svc.from('events_log').insert({
-      type,
-      member_id: adminId,
-      entity_id: entityId,
-      metadata,
-      tenant_id: currentTenant(),
-    })
-  } catch {
-    // swallow
+  // Best-effort but loud — failures log to server console so type
+  // mismatches and missing columns get caught early instead of silently
+  // dropping audit rows.
+  const { error } = await svc.from('events_log').insert({
+    type,
+    member_id: adminId,
+    entity_id: entityId,
+    metadata,
+    tenant_id: currentTenant(),
+  })
+  if (error) {
+    console.error(`[audit] events_log insert failed for type=${type}:`, error.message, { metadata })
   }
 }
 

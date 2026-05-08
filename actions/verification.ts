@@ -1,11 +1,13 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
-import { sendEmail, verificationSubmittedEmail } from '@/lib/email/send'
+import { sendEmail, verificationSubmittedEmail, verificationPendingAdminEmail } from '@/lib/email/send'
 import { siteUrl } from '@/lib/site-url'
-import { currentTenant } from '@/lib/tenant'
+import { currentTenant, type TenantId } from '@/lib/tenant'
+import { scrapeProfileForMembership } from '@/lib/linkedin-verification-scrape'
 
 /**
  * Member-side verification submission.
@@ -65,12 +67,13 @@ export async function submitVerification(formData: FormData): Promise<{ error: s
   }
 
   // Look up tenant + identity from profile. Identity is needed for the
-  // confirmation email; tenant is needed for the verifications row.
+  // confirmation email; tenant is needed for the verifications row;
+  // chapter is included in the admin notification email.
   const { data: profile } = await db
     .from('profiles')
-    .select('tenant_id, verification_tag, full_name, eo_membership_email')
+    .select('tenant_id, verification_tag, full_name, eo_membership_email, eo_chapter')
     .eq('id', user.id)
-    .maybeSingle() as { data: { tenant_id: string; verification_tag: string; full_name: string | null; eo_membership_email: string | null } | null }
+    .maybeSingle() as { data: { tenant_id: string; verification_tag: string; full_name: string | null; eo_membership_email: string | null; eo_chapter: string | null } | null }
 
   if (profile?.verification_tag && profile.verification_tag !== 'unverified') {
     // Already verified. Don't accept another submission.
@@ -90,9 +93,10 @@ export async function submitVerification(formData: FormData): Promise<{ error: s
     return { error: 'You already have a verification awaiting review' }
   }
 
-  const { error } = await db.from('verifications').insert({
+  const tenantId = (profile?.tenant_id ?? currentTenant()) as TenantId
+  const { data: inserted, error } = await db.from('verifications').insert({
     member_id: user.id,
-    tenant_id: profile?.tenant_id ?? currentTenant(),
+    tenant_id: tenantId,
     method: 'screenshot',
     screenshot_url: parsed.data.screenshot_url,
     linkedin_url: parsed.data.linkedin_url ?? null,
@@ -100,20 +104,108 @@ export async function submitVerification(formData: FormData): Promise<{ error: s
     // override) fills it in.
     status: 'pending',
   })
+    .select('id')
+    .maybeSingle() as { data: { id: string } | null; error: { message: string } | null }
 
   if (error) return { error: error.message }
 
-  // Best-effort confirmation email — log on failure but don't roll back
-  // the submission. The member can always check status in-app.
-  const to = profile?.eo_membership_email ?? user.email ?? null
-  if (to) {
-    const tpl = verificationSubmittedEmail(profile?.full_name ?? 'there', siteUrl())
-    sendEmail({ to, subject: tpl.subject, html: tpl.html }).catch(err => {
-      console.error('verification submitted email failed:', err)
-    })
+  // Email side-effects are defensively wrapped — the verification row
+  // is already saved at this point, so a missing env var (siteUrl,
+  // SMTP, etc.) or template error must NOT bubble out and 500 the
+  // user-facing submit. Log and continue.
+  const memberName = profile?.full_name ?? 'there'
+  const memberEmail = profile?.eo_membership_email ?? user.email ?? null
+  try {
+    if (memberEmail) {
+      const tpl = verificationSubmittedEmail(memberName, siteUrl())
+      sendEmail({ to: memberEmail, subject: tpl.subject, html: tpl.html }).catch(err => {
+        console.error('[verification] member confirmation email failed:', err)
+      })
+    }
+  } catch (err) {
+    console.error('[verification] member confirmation email setup failed:', err)
+  }
+
+  // Fan out to all super_admins so the queue gets picked up. Service-role
+  // client because the user-scoped session can't read other users' rows.
+  // Per-recipient sendEmail is a Promise — swallow individual rejections
+  // so one bad address doesn't take down the whole loop.
+  try {
+    if (inserted?.id && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      const svc = createServiceClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY,
+        { auth: { persistSession: false } }
+      )
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: admins } = await (svc as any)
+        .from('profiles')
+        .select('eo_membership_email, full_name')
+        .eq('role', 'super_admin') as { data: Array<{ eo_membership_email: string | null; full_name: string | null }> | null }
+
+      const adminTpl = verificationPendingAdminEmail({
+        memberName,
+        memberEmail,
+        memberChapter: profile?.eo_chapter ?? null,
+        hasLinkedIn: !!parsed.data.linkedin_url,
+        siteUrl: siteUrl(),
+      })
+      for (const admin of admins ?? []) {
+        if (!admin.eo_membership_email) continue
+        sendEmail({
+          to: admin.eo_membership_email,
+          subject: adminTpl.subject,
+          html: adminTpl.html,
+        }).catch(err => {
+          console.error('[verification] admin notification email failed for', admin.eo_membership_email, err)
+        })
+      }
+    }
+  } catch (err) {
+    console.error('[verification] admin notification setup failed:', err)
+  }
+
+  // Fire the LinkedIn scrape in the background — admins should see the
+  // signal next time they refresh the queue, but we don't wait for it
+  // here (RapidAPI calls add 2-5s latency on the submit path otherwise).
+  // No-op if no LinkedIn URL was provided or RAPIDAPI_LINKEDIN_KEY is unset.
+  if (inserted?.id && parsed.data.linkedin_url) {
+    void runLinkedInScrapeForVerification(inserted.id, parsed.data.linkedin_url, tenantId)
   }
 
   revalidatePath('/dashboard/verify')
   revalidatePath('/admin/verifications')
   return { error: null }
+}
+
+/**
+ * Background scrape job. Runs after submitVerification returns to the
+ * client so the user isn't waiting on RapidAPI. Writes the resulting
+ * signal back to the verifications row via service-role client.
+ *
+ * Errors are swallowed and logged — leaving linkedin_signal null is the
+ * right fallback (admin sees "not checked" and can manually override).
+ */
+async function runLinkedInScrapeForVerification(
+  verificationId: string,
+  linkedinUrl: string,
+  tenantId: TenantId
+): Promise<void> {
+  try {
+    const signal = await scrapeProfileForMembership(linkedinUrl, tenantId)
+    if (signal === null) return // null = error or skipped, leave column null
+
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return
+    const svc = createServiceClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      { auth: { persistSession: false } }
+    )
+    await svc
+      .from('verifications')
+      .update({ linkedin_signal: signal })
+      .eq('id', verificationId)
+  } catch (err) {
+    console.error('[verification] background LinkedIn scrape failed:', err)
+  }
 }

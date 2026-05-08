@@ -21,11 +21,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // and pulling forward-compatible fields like notifications_seen_at
   // separately localises the blast radius of a missing column to
   // just the feature that depends on it (notifications bell).
-  const [{ data: profile }, { data: convs }, { data: ownedBusinesses }] = await Promise.all([
+  const [{ data: profile }, { data: convs }, { data: ownedBusinesses }, { count: cmAssignmentCount }] = await Promise.all([
     supabase.from('profiles').select('id, full_name, avatar_url, eo_chapter, role, status').eq('id', user.id).single(),
     db.from('conversations').select('id').contains('participant_ids', [user.id]) as Promise<{ data: Array<{ id: string }> | null }>,
     db.from('businesses').select('id, name').eq('owner_id', user.id) as Promise<{
       data: Array<{ id: string; name: string }> | null
+    }>,
+    // Count Chapter Manager assignments — a non-zero count means show
+    // the CM panel link in the navbar dropdown. Wrapped in a Promise
+    // so the whole layout fetch stays in one Promise.all.
+    db.from('chapter_managers').select('id', { count: 'exact', head: true }).eq('member_id', user.id) as Promise<{
+      count: number | null
     }>,
   ])
 
@@ -129,6 +135,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         unreadNotifications={unreadNotifications}
         recentNotifications={recentNotifications}
         ownedBusinessIds={(ownedBusinesses ?? []).map(b => b.id)}
+        isChapterManager={(cmAssignmentCount ?? 0) > 0}
         adsEnabled={ADS_ENABLED}
       />
       <main className="flex-1 mx-auto w-full max-w-[1280px] py-8 px-4 md:px-6">

@@ -13,7 +13,8 @@ import {
   verificationResubmitEmail,
 } from '@/lib/email/send'
 import { siteUrl } from '@/lib/site-url'
-import { currentTenant } from '@/lib/tenant'
+import { currentTenant, type TenantId } from '@/lib/tenant'
+import { scrapeProfileForMembership } from '@/lib/linkedin-verification-scrape'
 
 // Service-role client for operations that need to bypass RLS
 // (writing to other users' profile rows).
@@ -624,16 +625,18 @@ async function logEvent(
   // Best-effort audit log — never block the action if this insert fails
   // (e.g. transient DB blip). The action result is what matters; the
   // audit row is supplementary.
-  try {
-    await svc.from('events_log').insert({
-      type,
-      member_id: adminId,
-      entity_id: entityId,
-      metadata,
-      tenant_id: tenant,
-    })
-  } catch {
-    // swallow
+  // Best-effort but loud — failures log to server console so type
+  // mismatches and missing columns get caught early instead of silently
+  // dropping audit rows.
+  const { error } = await svc.from('events_log').insert({
+    type,
+    member_id: adminId,
+    entity_id: entityId,
+    metadata,
+    tenant_id: tenant,
+  })
+  if (error) {
+    console.error(`[audit] events_log insert failed for type=${type}:`, error.message, { metadata })
   }
 }
 
@@ -858,4 +861,45 @@ export async function setVerificationLinkedInSignal(
 
   revalidatePath('/admin/verifications')
   return { error: null }
+}
+
+/**
+ * Re-trigger the LinkedIn auto-scrape for an existing verification row.
+ * Used when the scrape failed at submit time (RapidAPI was down, key
+ * was missing, etc.) or when the admin wants a fresh read after the
+ * member updated their LinkedIn profile.
+ *
+ * Synchronous from the admin's perspective — the queue refresh shows
+ * the new signal immediately. Doesn't fire any emails or modify status.
+ */
+export async function rescrapeLinkedInSignal(
+  verificationId: string
+): Promise<{ error: string | null; signal?: 'yes' | 'no' | 'unclear' | null }> {
+  const ctx = await requireSuperAdmin()
+  if (!ctx.ok) return { error: ctx.error ?? 'Not authorized' }
+
+  const svc = adminDb()
+  const { data: row } = await svc
+    .from('verifications')
+    .select('id, tenant_id, linkedin_url')
+    .eq('id', verificationId)
+    .maybeSingle() as { data: { id: string; tenant_id: string; linkedin_url: string | null } | null }
+  if (!row) return { error: 'Verification not found' }
+  if (!row.linkedin_url) return { error: 'No LinkedIn URL on this submission' }
+
+  const signal = await scrapeProfileForMembership(row.linkedin_url, row.tenant_id as TenantId)
+
+  const { error } = await svc
+    .from('verifications')
+    .update({ linkedin_signal: signal })
+    .eq('id', verificationId)
+  if (error) return { error: error.message }
+
+  await logEvent(svc, 'verification_linkedin_signal_set', ctx.user!.id, verificationId, {
+    signal,
+    via: 'rescrape',
+  }, row.tenant_id)
+
+  revalidatePath('/admin/verifications')
+  return { error: null, signal }
 }
