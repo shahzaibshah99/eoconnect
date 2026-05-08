@@ -5,8 +5,9 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { after } from 'next/server'
 import { z } from 'zod'
-import { sendEmail, newMessageEmail } from '@/lib/email/send'
+import { sendEmail, newMessageEmail, inquiryClaimEmail } from '@/lib/email/send'
 import { siteUrl } from '@/lib/site-url'
+import { requireVerified } from '@/lib/verification-gate'
 
 const ConversationSchema = z.object({
   owner_id: z.string().uuid('Invalid owner'),
@@ -50,6 +51,10 @@ export async function sendMessage(formData: FormData): Promise<{ error: string |
   const db = supabase as any
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Not authenticated' }
+
+  // Per marketing-lead rule: unverified members can't send messages.
+  const gate = await requireVerified(db, user.id)
+  if (!gate.ok) return { error: gate.reason ?? 'Not allowed' }
 
   // Optional attachment fields come through as empty strings from the
   // form when no file was picked — coerce those to undefined so the
@@ -155,12 +160,65 @@ export async function sendInquiry(input: {
   business_id: string
   service_id: string | null
   body: string
-}): Promise<{ error: string | null; conversationId?: string }> {
+}): Promise<{ error: string | null; conversationId?: string; pendingClaim?: boolean }> {
   const supabase = await createClient()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Please sign in to send an inquiry' }
+
+  // F03: Inquiry on a pre-populated unclaimed listing → fire claim
+  // email to the listing's invite address, don't open a conversation.
+  // We branch BEFORE schema validation because owner_id is null for
+  // unclaimed rows and the schema would reject it.
+  const trimmedBody = (input.body ?? '').trim()
+  if (input.business_id) {
+    const { data: biz } = await db
+      .from('businesses')
+      .select('id, name, email, owner_id, is_pre_populated, claim_token')
+      .eq('id', input.business_id)
+      .maybeSingle() as { data: {
+        id: string; name: string; email: string | null;
+        owner_id: string | null; is_pre_populated: boolean; claim_token: string | null;
+      } | null }
+    if (biz && biz.is_pre_populated && !biz.owner_id) {
+      if (!trimmedBody || trimmedBody.length === 0) {
+        return { error: 'Add a short message so we can pass it on.' }
+      }
+      if (!biz.email || !biz.claim_token) {
+        return { error: "This listing isn't accepting inquiries right now." }
+      }
+      const { data: inquirerProfile } = await db
+        .from('profiles')
+        .select('full_name')
+        .eq('id', user.id)
+        .single() as { data: { full_name: string | null } | null }
+
+      const claimUrl = `${siteUrl()}/claim/${biz.claim_token}`
+      const tpl = inquiryClaimEmail({
+        businessName: biz.name,
+        inquirerName: inquirerProfile?.full_name ?? 'A Member Market user',
+        inquiryPreview: trimmedBody.slice(0, 500),
+        claimUrl,
+      })
+      // Best-effort. The inquiry interaction succeeds visually for the
+      // member regardless of email delivery — they'll see "we've notified
+      // the owner" and the platform's claim cron will follow up with
+      // additional reminders if the owner hasn't claimed yet.
+      sendEmail({ to: biz.email, subject: tpl.subject, html: tpl.html }).catch(err => {
+        console.error('[email] inquiry-claim send failed:', err)
+      })
+      return { error: null, pendingClaim: true }
+    }
+  }
+
+  // Per marketing-lead rule: unverified members can't send inquiries
+  // to claimed listings either. Gate runs AFTER the unclaimed branch
+  // above so unclaimed listings still trigger a claim email regardless
+  // (closing the inquiry-on-unclaimed loop matters more than gating
+  // anonymous-feeling outreach).
+  const gate = await requireVerified(db, user.id)
+  if (!gate.ok) return { error: gate.reason ?? 'Not allowed' }
 
   const parsed = InquirySchema.safeParse(input)
   if (!parsed.success) return { error: parsed.error.issues[0].message }

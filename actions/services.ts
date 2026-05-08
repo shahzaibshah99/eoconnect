@@ -6,13 +6,22 @@ import { refreshBusinessEmbedding } from '@/lib/ai/refresh-business-embedding'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 
+// Per F02: services and products live in the same table with an
+// item_type discriminator. Defaults to 'service' for backwards-compat
+// with rows created before migration 020.
 const ServiceSchema = z.object({
-  title: z.string().min(3, 'Service title required'),
+  title: z.string().min(3, 'Title required'),
   description: z.string().optional(),
   pricing_model: z.enum(['fixed', 'hourly', 'project', 'contact']),
   price_from: z.coerce.number().min(0).optional(),
   price_to: z.coerce.number().min(0).optional(),
+  item_type: z.enum(['service', 'product']).optional(),
 })
+
+// Per F02: hard cap on services+products combined per business listing.
+// Bumped from 3 → 8 in the launch scope. Single source of truth used
+// by the action AND the UI's "(N/8)" labels.
+export const MAX_SERVICES_PER_BUSINESS = 8
 
 export type ServiceActionResult = { error: string | null; id?: string }
 
@@ -49,13 +58,13 @@ export async function createService(business_id: string, formData: FormData): Pr
   if (!business) return { error: 'Business not found' }
   if (!admin && business.owner_id !== user.id) return { error: 'Not authorized' }
 
-  // MM-07: Hard cap of 3 services per business listing
+  // F02: cap services+products combined at MAX_SERVICES_PER_BUSINESS.
   const { count: existingCount } = await db
     .from('services')
     .select('id', { count: 'exact', head: true })
     .eq('business_id', business_id) as { count: number | null }
-  if (existingCount !== null && existingCount >= 3) {
-    return { error: 'Maximum 3 services per business. Delete an existing service to add a new one.' }
+  if (existingCount !== null && existingCount >= MAX_SERVICES_PER_BUSINESS) {
+    return { error: `Maximum ${MAX_SERVICES_PER_BUSINESS} services or products per business. Delete an existing one to add another.` }
   }
 
   const parsed = ServiceSchema.safeParse({
@@ -64,6 +73,7 @@ export async function createService(business_id: string, formData: FormData): Pr
     pricing_model: formData.get('pricing_model'),
     price_from: formData.get('price_from'),
     price_to: formData.get('price_to'),
+    item_type: formData.get('item_type') ?? undefined,
   })
 
   if (!parsed.success) return { error: parsed.error.issues[0].message }
@@ -136,6 +146,7 @@ export async function updateService(id: string, formData: FormData): Promise<Ser
     pricing_model: formData.get('pricing_model'),
     price_from: formData.get('price_from'),
     price_to: formData.get('price_to'),
+    item_type: formData.get('item_type') ?? undefined,
   })
 
   if (!parsed.success) return { error: parsed.error.issues[0].message }

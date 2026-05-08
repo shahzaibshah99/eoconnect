@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { Navbar } from '@/components/layout/navbar'
 import { Footer } from '@/components/layout/footer'
 import { ADS_ENABLED } from '@/lib/feature-flags'
+import type { NotificationItem } from '@/components/layout/notifications-button'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -64,68 +65,106 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     unreadMessages = count ?? 0
   }
 
-  // Notifications: reviews left on the user's businesses since the
-  // last time they opened the bell. Anchor with a defensive fallback
-  // (now()) for accounts that pre-date migration 020 — those will
-  // start with a clean slate.
+  // Notifications: reviews on the user's businesses + entries from
+  // the general-purpose `notifications` table (verification status,
+  // future flag dispositions, etc.). Both contribute to the unread
+  // badge and the dropdown body, sorted by recency.
+  //
+  // Anchor with a defensive fallback (now()) for accounts that pre-date
+  // migration 020 — those will start with a clean slate.
   let unreadNotifications = 0
-  let recentNotifications: Array<{
-    id: string
-    rating: number
-    body: string | null
-    business_id: string
-    business_name: string
-    reviewer_name: string
-    created_at: string
-  }> = []
-  if (ownedBusinesses && ownedBusinesses.length > 0) {
-    const businessIds = ownedBusinesses.map(b => b.id)
-    const businessNameById = new Map(ownedBusinesses.map(b => [b.id, b.name]))
-    // notificationsSeenAt was fetched above in a try/catch so a
-    // missing column doesn't break the rest of the layout. If null,
-    // anchor at "now" — that means existing reviews don't count as
-    // unread, only ones that arrive after this render.
-    const seenAt = notificationsSeenAt ?? new Date().toISOString()
-    // Pull the latest reviews on user's businesses across two
-    // queries: count of unread (since seen_at) for the badge, plus
-    // the 5 most-recent reviews for the dropdown body.
-    const [{ count: unreadCount }, { data: recentRows }] = await Promise.all([
-      db
-        .from('reviews')
-        .select('id', { count: 'exact', head: true })
-        .in('business_id', businessIds)
-        .gt('created_at', seenAt) as Promise<{ count: number | null }>,
-      db
-        .from('reviews')
-        .select('id, rating, body, business_id, reviewer_id, created_at, reviewer:profiles!reviewer_id(full_name)')
-        .in('business_id', businessIds)
-        .order('created_at', { ascending: false })
-        .limit(5) as Promise<{
-          data: Array<{
-            id: string; rating: number; body: string | null; business_id: string;
-            reviewer_id: string; created_at: string;
-            reviewer: { full_name: string } | { full_name: string }[] | null
-          }> | null
-        }>,
-    ])
-    unreadNotifications = unreadCount ?? 0
-    recentNotifications = (recentRows ?? []).map(r => ({
-      id: r.id,
-      rating: r.rating,
-      body: r.body,
-      business_id: r.business_id,
-      business_name: businessNameById.get(r.business_id) ?? 'Listing',
-      // PostgREST !inner(...) returns either an array or a single
-      // object depending on the join cardinality. profiles to
-      // reviews is many-to-one so practically it's the object,
-      // but the typed result still allows array form — defend
-      // against both.
-      reviewer_name: Array.isArray(r.reviewer)
-        ? (r.reviewer[0]?.full_name ?? 'A member')
-        : (r.reviewer?.full_name ?? 'A member'),
-      created_at: r.created_at,
-    }))
-  }
+  let recentNotifications: NotificationItem[] = []
+
+  const businessIds = (ownedBusinesses ?? []).map(b => b.id)
+  const businessNameById = new Map((ownedBusinesses ?? []).map(b => [b.id, b.name]))
+  const seenAt = notificationsSeenAt ?? new Date().toISOString()
+
+  // Two parallel reads. Reviews count is gated on owning a listing
+  // because reviews-on-zero-listings is structurally impossible.
+  // System notifications run for everyone — verification updates fire
+  // before the user owns anything.
+  const [
+    { count: reviewUnread },
+    { data: reviewRows },
+    { count: systemUnread },
+    { data: systemRows },
+  ] = await Promise.all([
+    businessIds.length > 0
+      ? (db
+          .from('reviews')
+          .select('id', { count: 'exact', head: true })
+          .in('business_id', businessIds)
+          .gt('created_at', seenAt) as Promise<{ count: number | null }>)
+      : Promise.resolve({ count: 0 }),
+    businessIds.length > 0
+      ? (db
+          .from('reviews')
+          .select('id, rating, body, business_id, reviewer_id, created_at, reviewer:profiles!reviewer_id(full_name)')
+          .in('business_id', businessIds)
+          .order('created_at', { ascending: false })
+          .limit(5) as Promise<{
+            data: Array<{
+              id: string; rating: number; body: string | null; business_id: string;
+              reviewer_id: string; created_at: string;
+              reviewer: { full_name: string } | { full_name: string }[] | null
+            }> | null
+          }>)
+      : Promise.resolve({ data: [] as Array<{
+          id: string; rating: number; body: string | null; business_id: string;
+          reviewer_id: string; created_at: string;
+          reviewer: { full_name: string } | { full_name: string }[] | null
+        }> }),
+    db
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .gt('created_at', seenAt) as Promise<{ count: number | null }>,
+    db
+      .from('notifications')
+      .select('id, type, title, body, link, created_at')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(5) as Promise<{
+        data: Array<{ id: string; type: string; title: string; body: string | null; link: string | null; created_at: string }> | null
+      }>,
+  ])
+
+  unreadNotifications = (reviewUnread ?? 0) + (systemUnread ?? 0)
+
+  const reviewItems: NotificationItem[] = (reviewRows ?? []).map(r => ({
+    kind: 'review' as const,
+    id: r.id,
+    rating: r.rating,
+    body: r.body,
+    business_id: r.business_id,
+    business_name: businessNameById.get(r.business_id) ?? 'Listing',
+    // PostgREST !inner(...) returns either an array or a single
+    // object depending on the join cardinality. profiles to
+    // reviews is many-to-one so practically it's the object,
+    // but the typed result still allows array form — defend
+    // against both.
+    reviewer_name: Array.isArray(r.reviewer)
+      ? (r.reviewer[0]?.full_name ?? 'A member')
+      : (r.reviewer?.full_name ?? 'A member'),
+    created_at: r.created_at,
+  }))
+
+  const systemItems: NotificationItem[] = (systemRows ?? []).map(n => ({
+    kind: 'system' as const,
+    id: n.id,
+    type: n.type,
+    title: n.title,
+    body: n.body,
+    link: n.link,
+    created_at: n.created_at,
+  }))
+
+  // Merge and slice to top 5 by recency. The bell only ever shows
+  // five items at a time; older entries live in /dashboard (eventually
+  // a dedicated notifications page).
+  recentNotifications = [...reviewItems, ...systemItems]
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, 5)
 
   return (
     <div className="min-h-screen flex flex-col bg-background">

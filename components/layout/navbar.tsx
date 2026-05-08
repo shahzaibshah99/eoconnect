@@ -232,7 +232,18 @@ export function Navbar({
                   <Link href="/chapter-manager" className="flex items-center w-full">Chapter Manager Panel</Link>
                 </DropdownMenuItem>
               )}
-              {profile?.role && ['chapter_admin', 'super_admin'].includes(profile.role) && (
+              {/* Admin Panel link visibility:
+                   - super_admin: always (platform-wide; covers testing
+                     where they may also self-assign as CM).
+                   - chapter_admin: only when NOT also a Chapter Manager.
+                     Per scope, L4 (CM) and L5 (App Admin) are different
+                     hats — a chapter_admin who's also a CM is redundant,
+                     and showing both panels confuses the role boundary.
+                   - members: never (handled by the role check). */}
+              {profile?.role && (
+                profile.role === 'super_admin' ||
+                (profile.role === 'chapter_admin' && !isChapterManager)
+              ) && (
                 <DropdownMenuItem>
                   <Link href="/admin" className="flex items-center w-full">Admin Panel</Link>
                 </DropdownMenuItem>

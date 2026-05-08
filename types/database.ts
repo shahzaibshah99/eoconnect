@@ -50,7 +50,9 @@ export interface Category {
 
 export interface Business {
   id: string
-  owner_id: string
+  /** Nullable for pre-populated listings created via CSV import (F03)
+   *  before a member claims them. Real members always have owner_id set. */
+  owner_id: string | null
   name: string
   tagline: string | null
   description: string | null
@@ -70,6 +72,10 @@ export interface Business {
   paused_by: 'owner' | 'admin' | null
   category_ids: string[]
   tags: string[]
+  /** F02: 90 days no owner login → greyed in search but still accessible. */
+  slow_replier: boolean
+  /** F03: true while a pre-populated listing is awaiting a real-member claim. */
+  is_pre_populated: boolean
   created_at: string
   updated_at: string
 }
@@ -84,6 +90,12 @@ export interface Service {
   price_to: number | null
   thumbnail_url: string | null
   status: 'draft' | 'published'
+  /** F02: discriminator added in migration 020. Existing rows default
+   *  to 'service' to preserve backwards-compatibility. */
+  item_type: 'service' | 'product'
+  /** F02 + F20: paid-tier offer attached to this service/product.
+   *  Null until the member upgrades and the member_offers flag flips on. */
+  offer_text: string | null
   created_at: string
 }
 

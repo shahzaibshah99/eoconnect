@@ -25,6 +25,16 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
+  // Fetch verification state — drives the "Verify to unlock" banner
+  // shown above all dashboard content for unverified members. Per
+  // marketing-lead rule: unverified members can't list/post/message.
+  const { data: profileTag } = await db
+    .from('profiles')
+    .select('verification_tag')
+    .eq('id', user.id)
+    .maybeSingle() as { data: { verification_tag: string } | null }
+  const isUnverified = profileTag?.verification_tag === 'unverified'
+
   // Fetch ALL the user's businesses for the switcher dropdown.
   const { data: ownedBusinesses } = await db
     .from('businesses')
@@ -89,15 +99,20 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     // outbound inquiries are the only conversations to show.
     return (
       <div className="space-y-6">
+        {isUnverified && <UnverifiedBanner />}
         <CustomerView conversations={customerConversations} />
         <div className="bg-card border border-border rounded-2xl p-8 text-center">
           <h2 className="text-2xl font-bold mb-2">Set up your business profile</h2>
-          <p className="text-muted-foreground mb-6">Create your listing to appear in the Member Market marketplace.</p>
+          <p className="text-muted-foreground mb-6">
+            {isUnverified
+              ? 'Verify your membership first, then create your listing to appear in the marketplace.'
+              : 'Create your listing to appear in the Member Market marketplace.'}
+          </p>
           <Link
-            href="/dashboard/business/new"
+            href={isUnverified ? '/dashboard/verify' : '/dashboard/business/new'}
             className={cn(buttonVariants(), 'bg-primary text-primary-foreground font-bold')}
           >
-            Create Profile
+            {isUnverified ? 'Verify Membership' : 'Create Profile'}
           </Link>
         </div>
       </div>
@@ -255,9 +270,39 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   )
 
   return (
-    <DashboardViewToggle
-      providerContent={providerView}
-      customerContent={<CustomerView conversations={customerConversations} />}
-    />
+    <div className="space-y-6">
+      {isUnverified && <UnverifiedBanner />}
+      <DashboardViewToggle
+        providerContent={providerView}
+        customerContent={<CustomerView conversations={customerConversations} />}
+      />
+    </div>
+  )
+}
+
+/**
+ * Top-of-dashboard alert shown to members whose verification_tag is
+ * still 'unverified'. Per marketing-lead rule: until verified, members
+ * can't list businesses, post, or message — banner makes the gate
+ * obvious instead of letting them hit a server-side rejection later.
+ */
+function UnverifiedBanner() {
+  return (
+    <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-yellow-900 dark:text-yellow-200">
+          Your membership isn&apos;t verified yet
+        </p>
+        <p className="text-xs text-yellow-800/80 dark:text-yellow-200/80 mt-0.5">
+          Verify to unlock listing creation, posting, and messaging.
+        </p>
+      </div>
+      <Link
+        href="/dashboard/verify"
+        className={cn(buttonVariants({ size: 'sm' }), 'bg-yellow-600 hover:bg-yellow-700 text-white font-semibold shrink-0')}
+      >
+        Verify membership
+      </Link>
+    </div>
   )
 }

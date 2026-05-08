@@ -15,6 +15,7 @@ import {
 import { siteUrl } from '@/lib/site-url'
 import { currentTenant, type TenantId } from '@/lib/tenant'
 import { scrapeProfileForMembership } from '@/lib/linkedin-verification-scrape'
+import { notifyMember } from '@/lib/verification-gate'
 
 // Service-role client for operations that need to bypass RLS
 // (writing to other users' profile rows).
@@ -733,6 +734,16 @@ export async function approveVerification(
     })
   }
 
+  // In-app notification (per marketing-lead feedback). Members see
+  // this in the navbar bell even if they don't read email.
+  await notifyMember({
+    userId: row.member_id,
+    type: 'verification_approved',
+    title: `You're verified — ${VERIFICATION_TAG_LABEL[tag]}`,
+    body: 'Your member profile is verified and your listings now show your tier in search.',
+    link: '/dashboard',
+  })
+
   revalidatePath('/admin/verifications')
   revalidatePath('/admin/members')
   revalidatePath('/marketplace')
@@ -772,9 +783,20 @@ export async function rejectVerification(
     .eq('id', verificationId)
   if (error) return { error: error.message }
 
+  // Per marketing-lead feedback: rejection auto-suspends the account
+  // and stores the reason for the /suspended page to display.
+  await svc
+    .from('profiles')
+    .update({
+      status: 'suspended',
+      suspension_reason: parsed.data.reason,
+    })
+    .eq('id', row.member_id)
+
   await logEvent(svc, 'verification_rejected', ctx.user!.id, verificationId, {
     member_id: row.member_id,
     reason: parsed.data.reason,
+    auto_suspended: true,
   }, row.tenant_id)
 
   const contact = await getMemberContact(svc, row.member_id)
@@ -784,6 +806,18 @@ export async function rejectVerification(
       console.error('verification rejected email failed:', err)
     })
   }
+
+  await notifyMember({
+    userId: row.member_id,
+    type: 'verification_rejected',
+    title: 'Verification rejected — account suspended',
+    body: parsed.data.reason,
+    link: '/suspended',
+  })
+
+  // Cache bust the layout so the suspended state takes effect on
+  // the member's next nav action.
+  revalidatePath('/', 'layout')
 
   revalidatePath('/admin/verifications')
   return { error: null }
@@ -831,6 +865,14 @@ export async function requestVerificationResubmission(
       console.error('verification resubmit email failed:', err)
     })
   }
+
+  await notifyMember({
+    userId: row.member_id,
+    type: 'verification_resubmit_requested',
+    title: 'Please resubmit your verification',
+    body: parsed.data.reason,
+    link: '/dashboard/verify',
+  })
 
   revalidatePath('/admin/verifications')
   return { error: null }

@@ -5,6 +5,7 @@ import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { currentTenant } from '@/lib/tenant'
+import { _createPrePopulatedListing, _sendClaimEmail } from '@/actions/claim'
 
 function adminDb() {
   return createServiceClient(
@@ -200,28 +201,83 @@ export async function rejectCsvImport(id: string, note: string): Promise<{ error
 }
 
 /**
- * Marks an approved import as 'processed'. The actual creation of
- * profile/business rows is deferred — businesses.owner_id is NOT NULL
- * and requires a real auth user. Once the claim/magic-link flow exists
- * (F03 — pre-population & claim), this function will be extended to
- * iterate `payload.rows` and trigger invite emails.
+ * Process an approved CSV import: iterate the payload rows, create one
+ * pre-populated business listing per row, and fire claim invites.
  *
- * For now, marking processed is a manual signal that "the data has
- * been handed off to the eventual processor" — useful while the queue
- * UI exists ahead of the processor.
+ * Per scope F03:
+ *   - Listings created with is_pre_populated=true, owner_id=null,
+ *     claim_token set, claim_token_expires_at = now + 60d
+ *   - Each gets an immediate "claim your profile" email
+ *   - The daily slow-replier/claim cron sends day-1/7/30 reminders
+ *
+ * Skipped rows (duplicate email already on file as a published listing,
+ * malformed data, etc.) are reported in the result summary. The import
+ * row's status becomes 'processed' even if some rows skip — the
+ * processed_at timestamp marks end-of-run, not full success.
  */
-export async function markCsvImportProcessed(id: string): Promise<{ error: string | null }> {
+interface CsvRow {
+  email: string
+  full_name: string
+  business_name?: string
+  business_url?: string
+  city?: string
+  country?: string
+}
+
+export async function markCsvImportProcessed(id: string): Promise<{ error: string | null; created?: number; skipped?: number }> {
   const ctx = await requireAdmin()
   if (ctx.error) return { error: ctx.error }
 
   const svc = adminDb()
   const { data: row } = await svc
     .from('csv_imports')
-    .select('id, status, row_count')
+    .select('id, status, row_count, payload')
     .eq('id', id)
-    .maybeSingle() as { data: { id: string; status: string; row_count: number } | null }
+    .maybeSingle() as { data: { id: string; status: string; row_count: number; payload: { rows: CsvRow[] } } | null }
   if (!row) return { error: 'Import not found' }
   if (row.status !== 'approved') return { error: 'Only approved imports can be marked processed' }
+
+  const rows = row.payload?.rows ?? []
+  let created = 0
+  let skipped = 0
+
+  for (const r of rows) {
+    // Skip rows where this email is already on file as a claimed
+    // (real-owner) listing. Multiple pre-populated rows on the same
+    // email are also skipped — first one wins, the rest are noise.
+    const { data: existing } = await svc
+      .from('businesses')
+      .select('id')
+      .ilike('email', r.email)
+      .limit(1) as { data: Array<{ id: string }> | null }
+    if (existing && existing.length > 0) {
+      skipped++
+      continue
+    }
+
+    const createRes = await _createPrePopulatedListing(svc, {
+      name: r.business_name?.trim() || r.full_name,
+      email: r.email,
+      full_name: r.full_name,
+      website: r.business_url || '',
+      city: r.city || '',
+      country: r.country || '',
+      description: '',
+    })
+    if (createRes.error || !createRes.business_id) {
+      console.error('[csv-processor] create failed for', r.email, createRes.error)
+      skipped++
+      continue
+    }
+    created++
+
+    // Fire the initial claim email. Best-effort — one bad address can't
+    // halt the whole batch.
+    const sendRes = await _sendClaimEmail(svc, createRes.business_id)
+    if (sendRes.error) {
+      console.error('[csv-processor] claim email failed for', r.email, sendRes.error)
+    }
+  }
 
   const { error } = await svc
     .from('csv_imports')
@@ -229,8 +285,13 @@ export async function markCsvImportProcessed(id: string): Promise<{ error: strin
     .eq('id', id)
   if (error) return { error: error.message }
 
-  await logEvent(svc, 'csv_import_processed', ctx.user!.id, id, { row_count: row.row_count })
+  await logEvent(svc, 'csv_import_processed', ctx.user!.id, id, {
+    row_count: row.row_count,
+    created,
+    skipped,
+  })
 
   revalidatePath('/admin/imports')
-  return { error: null }
+  revalidatePath('/marketplace')
+  return { error: null, created, skipped }
 }

@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState, useTransition } from 'react'
-import { Bell, Star } from 'lucide-react'
+import { Bell, Star, ShieldCheck, ShieldAlert, ShieldX } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import {
   DropdownMenu,
@@ -15,15 +15,32 @@ import { markNotificationsRead } from '@/actions/notifications'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 
-export interface NotificationItem {
-  id: string
-  rating: number
-  body: string | null
-  business_id: string
-  business_name: string
-  reviewer_name: string
-  created_at: string
-}
+/**
+ * Discriminated union: bell renders both legacy review notifications
+ * and the new generic notifications table.
+ *   kind = 'review'   → existing reviews-on-your-listings flow
+ *   kind = 'system'   → general notifications (verification status, etc.)
+ */
+export type NotificationItem =
+  | {
+      kind: 'review'
+      id: string
+      rating: number
+      body: string | null
+      business_id: string
+      business_name: string
+      reviewer_name: string
+      created_at: string
+    }
+  | {
+      kind: 'system'
+      id: string
+      type: string
+      title: string
+      body: string | null
+      link: string | null
+      created_at: string
+    }
 
 interface NotificationsButtonProps {
   unread: number
@@ -158,11 +175,11 @@ export function NotificationsButton({ unread, recent, ownedBusinessIds }: Notifi
         </div>
         {recent.length === 0 ? (
           <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-            No reviews yet.
+            No notifications yet.
           </div>
         ) : (
           <div className="max-h-96 overflow-y-auto">
-            {recent.map(n => (
+            {recent.map(n => n.kind === 'review' ? (
               <DropdownMenuItem
                 key={n.id}
                 className="cursor-pointer flex-col items-start gap-1 px-3 py-2.5 rounded-none"
@@ -187,6 +204,27 @@ export function NotificationsButton({ unread, recent, ownedBusinessIds }: Notifi
                   </p>
                 )}
               </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem
+                key={n.id}
+                className="cursor-pointer flex-col items-start gap-1 px-3 py-2.5 rounded-none"
+                onClick={() => n.link && router.push(n.link)}
+              >
+                <div className="flex items-center justify-between w-full gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <SystemNotifIcon type={n.type} />
+                    <p className="text-sm font-medium truncate">{n.title}</p>
+                  </div>
+                  <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                    {formatDistanceToNow(new Date(n.created_at), { addSuffix: false })}
+                  </span>
+                </div>
+                {n.body && (
+                  <p className="text-xs text-muted-foreground line-clamp-2 w-full">
+                    {n.body}
+                  </p>
+                )}
+              </DropdownMenuItem>
             ))}
           </div>
         )}
@@ -201,4 +239,23 @@ export function NotificationsButton({ unread, recent, ownedBusinessIds }: Notifi
       </DropdownMenuContent>
     </DropdownMenu>
   )
+}
+
+/**
+ * Type-aware icon for system notifications. Falls back to a neutral
+ * shield for unknown types so adding a new notification type doesn't
+ * require a code change here — the bell still renders, just with a
+ * neutral icon, and the next dev can add specific styling later.
+ */
+function SystemNotifIcon({ type }: { type: string }) {
+  if (type === 'verification_approved') {
+    return <ShieldCheck className="h-3.5 w-3.5 text-green-600 shrink-0" />
+  }
+  if (type === 'verification_rejected') {
+    return <ShieldX className="h-3.5 w-3.5 text-destructive shrink-0" />
+  }
+  if (type === 'verification_resubmit_requested') {
+    return <ShieldAlert className="h-3.5 w-3.5 text-yellow-600 shrink-0" />
+  }
+  return <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
 }

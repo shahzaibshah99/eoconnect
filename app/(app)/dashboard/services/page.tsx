@@ -104,16 +104,16 @@ export default async function ListingsPage() {
                     </Link>
                   </div>
                 </div>
-                {bizServices.length >= 3 ? (
+                {bizServices.length >= 8 ? (
                   <span className="text-xs text-muted-foreground bg-muted px-3 py-1.5 rounded-md flex-shrink-0">
-                    Max 3 services
+                    Max 8 services or products
                   </span>
                 ) : (
                   <Link
                     href={`/dashboard/services/new?business=${biz.id}`}
                     className={cn(buttonVariants({ size: 'sm' }), 'bg-primary text-primary-foreground font-bold gap-1 flex-shrink-0')}
                   >
-                    + Add Service ({bizServices.length}/3)
+                    + Add Service or Product ({bizServices.length}/8)
                   </Link>
                 )}
               </div>

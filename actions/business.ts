@@ -9,6 +9,7 @@ import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { PORTFOLIO_MAX_TOTAL_BYTES, formatBytes } from '@/lib/portfolio-limits'
 import { normalizeWebsite } from '@/lib/normalize-website'
+import { requireVerified } from '@/lib/verification-gate'
 
 // Two distinct duplicate-website errors so the UI can guide the user
 // to the right next step:
@@ -84,6 +85,10 @@ export async function createBusiness(formData: FormData): Promise<BusinessAction
   const db = supabase as any
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Not authenticated' }
+
+  // Per marketing-lead rule: unverified members can't list businesses.
+  const gate = await requireVerified(db, user.id)
+  if (!gate.ok) return { error: gate.reason ?? 'Not allowed' }
 
   const raw = {
     name: formData.get('name'),

@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/verification-reminders",
       "schedule": "13 9 * * *"
+    },
+    {
+      "path": "/api/cron/slow-replier-nudges",
+      "schedule": "17 9 * * *"
     }
   ]
 }

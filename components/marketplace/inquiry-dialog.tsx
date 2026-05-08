@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { sendInquiry } from '@/actions/messages'
+import { toast } from 'sonner'
 
 interface ServiceOption {
   id: string
@@ -61,7 +62,13 @@ export function InquiryDialog({
         return
       }
       setOpen(false)
-      // Drop them into the conversation so they see their inquiry was sent.
+      // Pre-populated listings have no real owner yet — the action emailed
+      // the invite address with a claim link. Surface that to the user
+      // rather than dropping them into an empty messages page.
+      if (res.pendingClaim) {
+        toast.success("We've passed your message to the business — we'll let them know to claim their listing and reply.")
+        return
+      }
       if (res.conversationId) {
         router.push(`/dashboard/messages?conversation=${res.conversationId}`)
       } else {

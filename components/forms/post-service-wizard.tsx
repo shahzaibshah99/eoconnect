@@ -14,6 +14,7 @@ import { ChevronRight, ChevronLeft, Upload } from 'lucide-react'
 const STEPS = ['Service Details', 'Review & Add']
 
 type PricingModel = 'fixed' | 'hourly' | 'project' | 'contact'
+type ItemType = 'service' | 'product'
 
 interface FormData {
   title: string
@@ -21,6 +22,7 @@ interface FormData {
   pricing_model: PricingModel | ''
   price_from: string
   price_to: string
+  item_type: ItemType
 }
 
 interface PostServiceWizardProps {
@@ -38,6 +40,7 @@ export function PostServiceWizard({ businessId, onSuccess }: PostServiceWizardPr
     pricing_model: '',
     price_from: '',
     price_to: '',
+    item_type: 'service',
   })
   const [thumbnailFile, setThumbnailFile] = useState<File | null>(null)
   const [thumbnailPreview, setThumbnailPreview] = useState<string | null>(null)
@@ -62,6 +65,7 @@ export function PostServiceWizard({ businessId, onSuccess }: PostServiceWizardPr
     fd.set('title', formData.title)
     fd.set('description', formData.description)
     fd.set('pricing_model', formData.pricing_model)
+    fd.set('item_type', formData.item_type)
     if (formData.price_from) fd.set('price_from', formData.price_from)
     if (formData.price_to) fd.set('price_to', formData.price_to)
     if (thumbnailFile) fd.set('thumbnail', thumbnailFile)
@@ -98,14 +102,37 @@ export function PostServiceWizard({ businessId, onSuccess }: PostServiceWizardPr
         {/* Step 0: Service Details */}
         {step === 0 && (
           <div className="space-y-4">
-            <h2 className="text-xl font-bold">Service Details</h2>
+            <h2 className="text-xl font-bold">{formData.item_type === 'product' ? 'Product Details' : 'Service Details'}</h2>
             <div className="space-y-2">
-              <Label htmlFor="title">Service Title *</Label>
+              <Label>What are you adding? *</Label>
+              {/* Toggle between service and product. Stored as item_type
+                  on the services row (column added in migration 020).
+                  Defaults to 'service' for backwards-compat. */}
+              <div className="grid grid-cols-2 gap-2">
+                {(['service', 'product'] as const).map(t => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, item_type: t }))}
+                    className={
+                      'px-4 py-2.5 rounded-lg border text-sm font-medium capitalize transition-colors ' +
+                      (formData.item_type === t
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border hover:bg-muted')
+                    }
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="title">{formData.item_type === 'product' ? 'Product' : 'Service'} Title *</Label>
               <Input
                 id="title"
                 value={formData.title}
                 onChange={e => update('title', e.target.value)}
-                placeholder="e.g. Brand Strategy Consultation"
+                placeholder={formData.item_type === 'product' ? 'e.g. Custom Branding Package' : 'e.g. Brand Strategy Consultation'}
                 required
               />
             </div>

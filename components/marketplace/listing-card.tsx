@@ -1,8 +1,9 @@
 import Link from 'next/link'
 import Image from 'next/image'
-import { MapPin, Star } from 'lucide-react'
+import { MapPin, Star, Clock } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import type { Business } from '@/types/database'
+import { cn } from '@/lib/utils'
 
 interface ListingCardProps {
   business: Business & {
@@ -14,13 +15,21 @@ interface ListingCardProps {
 }
 
 export function ListingCard({ business }: ListingCardProps) {
+  // Per F02: slow-replier listings stay searchable and accessible but
+  // render with reduced opacity + a "Slow replier" label so members can
+  // calibrate expectations. Activated by the daily cron once an owner
+  // hasn't logged in for 90 days; cleared on next login.
+  const isSlowReplier = business.slow_replier
   return (
     // h-full + flex-col on the card lets every grid cell stretch to
     // the tallest sibling. Internal sections then push the location
     // row to the bottom with mt-auto so the row of cards aligns
     // visually regardless of tagline length.
     <Link href={`/marketplace/${business.id}`} className="block h-full">
-      <div className="group bg-card border border-border rounded-xl overflow-hidden hover:border-primary transition-all hover:shadow-lg flex flex-col h-full">
+      <div className={cn(
+        'group bg-card border border-border rounded-xl overflow-hidden hover:border-primary transition-all hover:shadow-lg flex flex-col h-full',
+        isSlowReplier && 'opacity-70 grayscale-40 hover:opacity-90 hover:grayscale-0'
+      )}>
         {business.cover_url ? (
           <div className="relative h-32 w-full">
             <Image src={business.cover_url} alt={business.name} fill className="object-cover" />
@@ -29,12 +38,22 @@ export function ListingCard({ business }: ListingCardProps) {
                 Featured
               </span>
             )}
+            {isSlowReplier && (
+              <span className="absolute top-2 left-2 text-[10px] bg-muted/95 text-muted-foreground border border-border px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1">
+                <Clock className="h-3 w-3" /> Slow replier
+              </span>
+            )}
           </div>
         ) : (
-          <div className="h-32 w-full bg-muted flex items-center justify-center">
+          <div className="h-32 w-full bg-muted flex items-center justify-center relative">
             {business.is_sponsored && (
               <span className="text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded-full font-bold">
                 Featured
+              </span>
+            )}
+            {isSlowReplier && (
+              <span className="absolute top-2 left-2 text-[10px] bg-background/95 text-muted-foreground border border-border px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1">
+                <Clock className="h-3 w-3" /> Slow replier
               </span>
             )}
           </div>

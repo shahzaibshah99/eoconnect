@@ -396,6 +396,87 @@ export function verificationGraceExpiredEmail(name: string, siteUrl: string) {
   }
 }
 
+// Slow-replier nudges: sent before the member trips the 90-day flag.
+//
+// Per F02: at 60 and 85 days no login the member is emailed asking
+// them to pop in. At 90, the slow_replier flag flips and their listings
+// render greyed in search until they log in again.
+
+export function slowReplierDay60Email(name: string, siteUrl: string) {
+  return {
+    subject: 'Your listings miss you',
+    html: wrap('Come back soon', `
+      <h1 style="font-size:18px;margin:0 0 12px;">Hey ${escapeHtml(name)} — it&apos;s been a while</h1>
+      <p style="font-size:14px;color:#444;line-height:1.5;">
+        You haven&apos;t logged in for 60 days. Just a friendly nudge so you don&apos;t miss any inquiries.
+        At 90 days inactive your listings get marked as &ldquo;slow replier&rdquo; in search — easily
+        avoided with a single login.
+      </p>
+      <p style="margin-top:20px;">
+        <a href="${siteUrl}/dashboard" style="background:#0A2218;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;">
+          Open dashboard
+        </a>
+      </p>
+    `)
+  }
+}
+
+export function slowReplierDay85Email(name: string, siteUrl: string) {
+  return {
+    subject: '5 days until your listings are flagged',
+    html: wrap('Slow replier flag in 5 days', `
+      <h1 style="font-size:18px;margin:0 0 12px;">${escapeHtml(name)} — last call before the slow-replier flag</h1>
+      <p style="font-size:14px;color:#444;line-height:1.5;">
+        You&apos;re 85 days into your inactive window. In 5 days your listings will start rendering greyed
+        in search results with a &ldquo;slow replier&rdquo; label.
+      </p>
+      <p style="font-size:14px;color:#444;line-height:1.5;">
+        One login clears the flag instantly.
+      </p>
+      <p style="margin-top:20px;">
+        <a href="${siteUrl}/dashboard" style="background:#B86800;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;">
+          Log in now
+        </a>
+      </p>
+    `)
+  }
+}
+
+/**
+ * Claim email triggered by an inquiry on an unclaimed pre-populated
+ * listing. Per scope F03: "Someone just enquired about your business
+ * on Member Market — claim your profile to respond."
+ */
+export function inquiryClaimEmail(input: {
+  businessName: string
+  inquirerName: string
+  inquiryPreview: string
+  claimUrl: string
+}) {
+  const { businessName, inquirerName, inquiryPreview, claimUrl } = input
+  return {
+    subject: `Someone just enquired about ${businessName}`,
+    html: wrap('New inquiry — claim to respond', `
+      <h1 style="font-size:18px;margin:0 0 12px;">${escapeHtml(inquirerName)} just enquired about ${escapeHtml(businessName)}</h1>
+      <p style="font-size:14px;color:#444;line-height:1.5;">
+        Your business is listed on Member Market but hasn&apos;t been claimed yet. A fellow EO member just sent
+        an inquiry — claim your profile to read the message and reply.
+      </p>
+      <blockquote style="border-left:3px solid #0A2218;padding:8px 16px;margin:16px 0;background:#fafafa;font-size:14px;color:#333;">
+        ${escapeHtml(inquiryPreview)}
+      </blockquote>
+      <p style="margin-top:20px;">
+        <a href="${claimUrl}" style="background:#0A2218;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;">
+          Claim &amp; respond
+        </a>
+      </p>
+      <p style="font-size:12px;color:#888;margin-top:16px;">
+        Once you claim, you&apos;ll see all inquiries in your dashboard.
+      </p>
+    `)
+  }
+}
+
 export function claimReminderEmail(name: string, businessName: string, daysLeft: number, claimUrl: string) {
   return {
     subject: `Claim your Member Market profile — ${businessName}`,
