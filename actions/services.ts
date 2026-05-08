@@ -5,6 +5,7 @@ import { uploadFile } from '@/lib/storage'
 import { refreshBusinessEmbedding } from '@/lib/ai/refresh-business-embedding'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
+import { MAX_SERVICES_PER_BUSINESS } from '@/lib/services-constants'
 
 // Per F02: services and products live in the same table with an
 // item_type discriminator. Defaults to 'service' for backwards-compat
@@ -17,11 +18,6 @@ const ServiceSchema = z.object({
   price_to: z.coerce.number().min(0).optional(),
   item_type: z.enum(['service', 'product']).optional(),
 })
-
-// Per F02: hard cap on services+products combined per business listing.
-// Bumped from 3 → 8 in the launch scope. Single source of truth used
-// by the action AND the UI's "(N/8)" labels.
-export const MAX_SERVICES_PER_BUSINESS = 8
 
 export type ServiceActionResult = { error: string | null; id?: string }
 
