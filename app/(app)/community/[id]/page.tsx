@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic'
 
 interface PageProps { params: Promise<{ id: string }> }
 
-export default async function BulletinPostPage({ params }: PageProps) {
+export default async function CommunityPostPage({ params }: PageProps) {
   const { id } = await params
   const supabase = await createClient()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -33,6 +33,7 @@ export default async function BulletinPostPage({ params }: PageProps) {
         profiles!member_id (full_name, avatar_url, eo_chapter, verification_tag)
       `)
       .eq('id', id)
+      .eq('board_type', 'community')
       .single(),
     db
       .from('post_responses')
@@ -48,21 +49,19 @@ export default async function BulletinPostPage({ params }: PageProps) {
   const post = postRes.data
   const replies = repliesRes.data ?? []
 
-  // F18: surface top-3 AI past referrals for this post's topic.
-  // Runs server-side so it shows on first load without a client fetch.
-  // Falls back to [] when OPENAI_API_KEY is missing or DB has no referrals yet.
+  // F18: AI referrals from community board (non-blocking).
   let aiReferrals: ReferralSearchResult[] = []
   try {
     const queryText = [post.title, post.detail].filter(Boolean).join('\n')
     if (queryText) {
       aiReferrals = await searchReferrals(db, {
         queryText,
-        boardType: (post.board_type ?? 'business') as 'business' | 'community',
+        boardType: 'community',
         matchCount: 3,
       })
     }
   } catch {
-    // Non-blocking — silently skip if search fails
+    // Silently skip if search fails
   }
 
   const isOwner = user?.id === post.member_id
@@ -74,8 +73,8 @@ export default async function BulletinPostPage({ params }: PageProps) {
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       {/* Back */}
-      <Link href="/bulletin" className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'gap-1.5 -ml-2')}>
-        <ArrowLeft className="h-4 w-4" /> Business Needs
+      <Link href="/community" className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'gap-1.5 -ml-2')}>
+        <ArrowLeft className="h-4 w-4" /> Community Asks
       </Link>
 
       {/* Post card */}
@@ -96,7 +95,7 @@ export default async function BulletinPostPage({ params }: PageProps) {
           </div>
           {isFulfilled && (
             <Badge className="bg-green-500/10 text-green-700 dark:text-green-400 border border-green-500/20 text-[10px]">
-              Fulfilled
+              Resolved
             </Badge>
           )}
         </div>
@@ -114,10 +113,10 @@ export default async function BulletinPostPage({ params }: PageProps) {
           <span className="flex items-center gap-1">
             <Clock className="h-3 w-3" />
             {daysLeft < 0
-              ? `Needed by ${format(requiredBy, 'MMM d, yyyy')} (expired)`
+              ? `Open until ${format(requiredBy, 'MMM d, yyyy')} (expired)`
               : daysLeft === 0
-                ? 'Needed today'
-                : `Needed by ${format(requiredBy, 'MMM d, yyyy')} (${daysLeft} day${daysLeft === 1 ? '' : 's'} left)`
+                ? 'Closing today'
+                : `Open until ${format(requiredBy, 'MMM d, yyyy')} (${daysLeft} day${daysLeft === 1 ? '' : 's'} left)`
             }
           </span>
         </div>
@@ -136,13 +135,13 @@ export default async function BulletinPostPage({ params }: PageProps) {
         {isOwner && !isFulfilled && (
           <PostActions
             postId={post.id}
-            boardType={(post.board_type ?? 'business') as 'business' | 'community'}
+            boardType="community"
             aiReferrals={aiReferrals}
           />
         )}
       </div>
 
-      {/* Reply thread — AI referral cards appear at the top of the thread */}
+      {/* Reply thread */}
       <ReplyThread
         postId={post.id}
         replies={replies}

@@ -10,9 +10,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
-import { Sparkles, ChevronRight, Loader2, CheckCircle2, Building2 } from 'lucide-react'
+import { Sparkles, ChevronRight, Loader2, CheckCircle2, Building2, Users } from 'lucide-react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
+import type { ReferralSearchResult } from '@/lib/ai/referral-search'
 
 interface Category { id: string; name: string; slug: string }
 
@@ -27,6 +28,7 @@ interface FormState {
 
 interface PostWizardProps {
   categories: Category[]
+  boardType?: 'business' | 'community'
 }
 
 type Step = 'form' | 'reviewing' | 'ai-feedback' | 'posting' | 'receipt'
@@ -39,7 +41,7 @@ type Step = 'form' | 'reviewing' | 'ai-feedback' | 'posting' | 'receipt'
  *   inline. Member can address it or post anyway.
  * Step 3 (receipt): after submit, shows matched businesses.
  */
-export function PostWizard({ categories }: PostWizardProps) {
+export function PostWizard({ categories, boardType = 'business' }: PostWizardProps) {
   const router = useRouter()
   const [step, setStep] = useState<Step>('form')
   const [form, setForm] = useState<FormState>({
@@ -55,6 +57,8 @@ export function PostWizard({ categories }: PostWizardProps) {
   const [isComplete, setIsComplete] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [matched, setMatched] = useState<Array<{ id: string; name: string }>>([])
+  const [matchedMembers, setMatchedMembers] = useState<Array<{ id: string; name: string }>>([])
+  const [aiReferrals, setAiReferrals] = useState<ReferralSearchResult[]>([])
   const [postId, setPostId] = useState<string | null>(null)
   const [isReviewing, startReview] = useTransition()
   const [isPosting, startPost] = useTransition()
@@ -92,27 +96,55 @@ export function PostWizard({ categories }: PostWizardProps) {
       const res = await submitBulletinPost({
         ...form,
         tags: aiTags,
-        board_type: 'business',
+        board_type: boardType,
       })
       if (res.error) { setError(res.error); setStep('ai-feedback'); return }
       setMatched(res.matched_businesses ?? [])
+      setMatchedMembers(res.matched_members ?? [])
+      setAiReferrals(res.ai_referrals ?? [])
       setPostId(res.post_id ?? null)
       setStep('receipt')
     })
   }
 
   if (step === 'receipt') {
+    const isCommunity = boardType === 'community'
+    const backHref = isCommunity ? '/community' : '/bulletin'
     return (
       <div className="bg-card border border-border rounded-xl p-6 space-y-5">
         <div className="flex items-center gap-3">
           <CheckCircle2 className="h-6 w-6 text-green-600 shrink-0" />
           <div>
-            <h2 className="font-semibold">Your need is posted</h2>
+            <h2 className="font-semibold">{isCommunity ? 'Your ask is posted' : 'Your need is posted'}</h2>
             <p className="text-sm text-muted-foreground">Verified members can now reply in the thread.</p>
           </div>
         </div>
 
-        {matched.length > 0 && (
+        {/* Community: notified members */}
+        {isCommunity && matchedMembers.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-sm font-medium">
+              We notified {matchedMembers.length} {matchedMembers.length === 1 ? 'member' : 'members'} in your area:
+            </p>
+            <ul className="space-y-1">
+              {matchedMembers.map(m => (
+                <li key={m.id} className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Users className="h-3.5 w-3.5 shrink-0" />
+                  {m.name}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {isCommunity && matchedMembers.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            No matching members found in your country yet — your ask is live and anyone can reply.
+          </p>
+        )}
+
+        {/* Business: notified businesses */}
+        {!isCommunity && matched.length > 0 && (
           <div className="space-y-2">
             <p className="text-sm font-medium">
               We notified {matched.length} matching {matched.length === 1 ? 'business' : 'businesses'}:
@@ -133,19 +165,36 @@ export function PostWizard({ categories }: PostWizardProps) {
           </div>
         )}
 
-        {matched.length === 0 && (
+        {!isCommunity && matched.length === 0 && (
           <p className="text-sm text-muted-foreground">
             No businesses matched your tags yet — your post is live and members can still reply.
           </p>
         )}
 
+        {/* F18: AI referrals from similar past posts */}
+        {aiReferrals.length > 0 && (
+          <div className="space-y-2 pt-2 border-t border-border">
+            <p className="text-sm font-medium flex items-center gap-1.5">
+              <Sparkles className="h-4 w-4 text-primary" />
+              From similar past posts:
+            </p>
+            {aiReferrals.map(ref => (
+              <div key={ref.id} className="text-xs bg-primary/5 border border-primary/20 rounded-lg p-2.5">
+                <span className="font-medium">{ref.referred_name}</span>
+                {ref.referred_category && <span className="text-muted-foreground"> — {ref.referred_category}</span>}
+                {ref.referred_location && <span className="text-muted-foreground"> in {ref.referred_location}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="flex gap-2 pt-2">
           {postId && (
-            <Button onClick={() => router.push(`/bulletin/${postId}`)}>
+            <Button onClick={() => router.push(`${backHref}/${postId}`)}>
               View post &amp; thread →
             </Button>
           )}
-          <Button variant="outline" onClick={() => router.push('/bulletin')}>
+          <Button variant="outline" onClick={() => router.push(backHref)}>
             Back to board
           </Button>
         </div>

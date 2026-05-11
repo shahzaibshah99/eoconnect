@@ -28,9 +28,10 @@ export interface PostCardItem {
 interface PostCardProps {
   post: PostCardItem
   currentUserId?: string | null
+  basePath?: string
 }
 
-export function PostCard({ post, currentUserId: _ }: PostCardProps) {
+export function PostCard({ post, currentUserId: _, basePath = '/bulletin' }: PostCardProps) {
   const requiredBy = new Date(post.required_by)
   const daysLeft = differenceInDays(requiredBy, new Date())
   const isExpiringSoon = daysLeft >= 0 && daysLeft <= 2
@@ -38,7 +39,7 @@ export function PostCard({ post, currentUserId: _ }: PostCardProps) {
   const location = [post.geography_city, post.geography_country].filter(Boolean).join(', ')
 
   return (
-    <Link href={`/bulletin/${post.id}`} className="block group">
+    <Link href={`${basePath}/${post.id}`} className="block group">
       <div className={cn(
         'bg-card border border-border rounded-xl p-5 hover:border-primary transition-colors',
         post.status === 'fulfilled' && 'opacity-70',

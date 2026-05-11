@@ -104,8 +104,12 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  if (profile?.status === 'suspended' && pathname !== '/suspended') {
-    return redirectTo('/suspended')
+  if (profile?.status === 'suspended') {
+    // Suspended users land on /suspended and stay there.
+    // Returning early prevents the onboarding/business gates below
+    // from firing and bouncing them back into an infinite redirect loop.
+    if (pathname !== '/suspended') return redirectTo('/suspended')
+    return response
   }
 
   if (pathname.startsWith('/admin')) {
@@ -134,6 +138,8 @@ export async function proxy(request: NextRequest) {
     const exemptFromOnboardingGate =
       pathname === '/onboarding' ||
       pathname === '/reset-password' ||
+      pathname === '/suspended' ||
+      pathname === '/terms-accept' ||
       pathname.startsWith('/auth') ||
       pathname.startsWith('/api') ||
       pathname.startsWith('/_next') ||

@@ -7,8 +7,9 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { formatDistanceToNow } from 'date-fns'
-import { MessageSquare, ChevronDown } from 'lucide-react'
+import { formatDistanceToNow, format } from 'date-fns'
+import { MessageSquare, ChevronDown, Sparkles } from 'lucide-react'
+import type { ReferralSearchResult } from '@/lib/ai/referral-search'
 
 interface Reply {
   id: string
@@ -28,6 +29,8 @@ interface ReplyThreadProps {
   replies: Reply[]
   currentUserId: string | null
   isClosed: boolean
+  /** F18: AI-surfaced referrals from similar past posts — shown before live replies. */
+  aiReferrals?: ReferralSearchResult[]
   collapseAfter: number
   isOwner: boolean
 }
@@ -40,7 +43,7 @@ interface ReplyThreadProps {
  * - Closed when post is fulfilled or expired
  */
 export function ReplyThread({
-  postId, replies, currentUserId, isClosed, collapseAfter, isOwner: _isOwner,
+  postId, replies, currentUserId, isClosed, collapseAfter, isOwner: _isOwner, aiReferrals = [],
 }: ReplyThreadProps) {
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
@@ -71,6 +74,19 @@ export function ReplyThread({
           : `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}`
         }
       </div>
+
+      {/* F18: AI concierge — top-3 referrals from similar past posts */}
+      {aiReferrals.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <Sparkles className="h-3.5 w-3.5 text-primary" />
+            From similar past posts
+          </div>
+          {aiReferrals.map(ref => (
+            <AiReferralCard key={ref.id} referral={ref} />
+          ))}
+        </div>
+      )}
 
       {replies.length > 0 && (
         <div className="space-y-3">
@@ -131,6 +147,41 @@ export function ReplyThread({
           <a href="/login" className="text-primary hover:underline">Sign in</a> to reply.
         </p>
       )}
+    </div>
+  )
+}
+
+/**
+ * AI-surfaced referral card. Per scope F18: same thread format as a reply
+ * but labelled "AI: From a similar past post [date]". Shown before live
+ * replies so members see the collective network intelligence first.
+ */
+function AiReferralCard({ referral }: { referral: ReferralSearchResult }) {
+  return (
+    <div className="flex gap-3 p-4 rounded-xl border border-primary/20 bg-primary/5">
+      <div className="h-8 w-8 shrink-0 mt-0.5 rounded-full bg-primary/20 flex items-center justify-center">
+        <Sparkles className="h-4 w-4 text-primary" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline gap-2 flex-wrap mb-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-primary">
+            AI · From a similar past post
+          </span>
+          <span className="text-[11px] text-muted-foreground ml-auto">
+            {format(new Date(referral.created_at), 'MMM d, yyyy')}
+          </span>
+        </div>
+        <p className="text-sm">
+          <strong>{referral.referred_name}</strong>
+          {referral.referred_category && ` — ${referral.referred_category}`}
+          {referral.referred_location && ` in ${referral.referred_location}`}
+        </p>
+        {referral.full_text && (
+          <p className="text-xs text-muted-foreground mt-1 italic">
+            &ldquo;{referral.full_text}&rdquo;
+          </p>
+        )}
+      </div>
     </div>
   )
 }

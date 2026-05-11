@@ -7,6 +7,9 @@ import { z } from 'zod'
 import { currentTenant } from '@/lib/tenant'
 import { requireVerified } from '@/lib/verification-gate'
 import { reviewBulletinPost } from '@/lib/ai/review-bulletin-post'
+import { extractReferralsFromReply } from '@/lib/ai/extract-referrals'
+import { searchReferrals, type ReferralSearchResult } from '@/lib/ai/referral-search'
+import { getEmbedding } from '@/lib/ai/embeddings'
 import { sendEmail } from '@/lib/email/send'
 import { siteUrl } from '@/lib/site-url'
 import { VERIFICATION_TIER } from '@/lib/bulletin-constants'
@@ -92,6 +95,8 @@ export async function submitBulletinPost(input: unknown): Promise<{
   error: string | null
   post_id?: string
   matched_businesses?: Array<{ id: string; name: string }>
+  matched_members?: Array<{ id: string; name: string }>
+  ai_referrals?: ReferralSearchResult[]
 }> {
   const supabase = await createClient()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -140,27 +145,58 @@ export async function submitBulletinPost(input: unknown): Promise<{
 
   if (postErr || !post) return { error: postErr?.message ?? 'Failed to create post' }
 
-  // ── Matching engine ──────────────────────────────────────────
-  const matched = await matchAndNotify({
-    postId: post.id,
-    tags: parsed.data.tags ?? [],
-    country: parsed.data.geography_country,
-    city: parsed.data.geography_city ?? null,
-    postTitle: parsed.data.title,
-    posterName: poster?.full_name ?? 'An EO member',
-    siteUrl: siteUrl(),
-  })
+  // ── Matching / notification engine ───────────────────────────
+  // business board → match businesses by tag + geography
+  // community board → notify verified members in the same country
+  const boardType = (parsed.data.board_type ?? 'business') as 'business' | 'community'
+  let matched: Array<{ id: string; name: string }> = []
+  let matchedMembers: Array<{ id: string; name: string }> = []
 
-  // Store matched IDs on the post for the receipt screen.
-  if (matched.length > 0) {
-    await db
-      .from('bulletin_posts')
-      .update({ matched_business_ids: matched.map(m => m.id) })
-      .eq('id', post.id)
+  if (boardType === 'community') {
+    matchedMembers = await notifyMembersGeo({
+      postId: post.id,
+      country: parsed.data.geography_country,
+      city: parsed.data.geography_city ?? null,
+      postTitle: parsed.data.title,
+      posterName: poster?.full_name ?? 'A member',
+      posterId: user.id,
+      siteUrl: siteUrl(),
+    })
+    if (matchedMembers.length > 0) {
+      await db
+        .from('bulletin_posts')
+        .update({ matched_business_ids: matchedMembers.map(m => m.id) })
+        .eq('id', post.id)
+    }
+  } else {
+    matched = await matchAndNotify({
+      postId: post.id,
+      tags: parsed.data.tags ?? [],
+      country: parsed.data.geography_country,
+      city: parsed.data.geography_city ?? null,
+      postTitle: parsed.data.title,
+      posterName: poster?.full_name ?? 'An EO member',
+      siteUrl: siteUrl(),
+    })
+    if (matched.length > 0) {
+      await db
+        .from('bulletin_posts')
+        .update({ matched_business_ids: matched.map(m => m.id) })
+        .eq('id', post.id)
+    }
   }
 
+  // F18: surface top-3 relevant referrals from the referral DB.
+  const queryText = [parsed.data.title, parsed.data.detail].filter(Boolean).join('\n')
+  const aiReferrals = await searchReferrals(db, {
+    queryText,
+    boardType,
+    matchCount: 3,
+  })
+
   revalidatePath('/bulletin')
-  return { error: null, post_id: post.id, matched_businesses: matched }
+  revalidatePath('/community')
+  return { error: null, post_id: post.id, matched_businesses: matched, matched_members: matchedMembers, ai_referrals: aiReferrals }
 }
 
 // ── Matching engine ────────────────────────────────────────────
@@ -275,12 +311,12 @@ export async function replyToPost(input: unknown): Promise<{ error: string | nul
   const parsed = ReplySchema.safeParse(input)
   if (!parsed.success) return { error: parsed.error.issues[0].message }
 
-  // Refuse reply on a closed post.
+  // Refuse reply on a closed post. Fetch board_type for referral extraction.
   const { data: post } = await db
     .from('bulletin_posts')
-    .select('id, status, member_id')
+    .select('id, status, member_id, board_type')
     .eq('id', parsed.data.post_id)
-    .maybeSingle() as { data: { id: string; status: string; member_id: string } | null }
+    .maybeSingle() as { data: { id: string; status: string; member_id: string; board_type: string } | null }
   if (!post) return { error: 'Post not found' }
   if (post.status !== 'open') return { error: 'This post is no longer accepting replies' }
 
@@ -297,8 +333,71 @@ export async function replyToPost(input: unknown): Promise<{ error: string | nul
 
   if (error) return { error: error.message }
 
-  revalidatePath(`/bulletin/${parsed.data.post_id}`)
+  // F18: silently extract referrals from the reply in the background.
+  // "No prompt, no opt-in." — per scope. Extraction is best-effort;
+  // failure must never surface to the member or block the reply flow.
+  if (reply?.id && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    void runReferralExtraction({
+      replyId: reply.id,
+      postId: parsed.data.post_id,
+      content: parsed.data.content,
+      memberId: user.id,
+      boardType: post.board_type as 'business' | 'community',
+    })
+  }
+
+  const replyBasePath = post.board_type === 'community' ? '/community' : '/bulletin'
+  revalidatePath(`${replyBasePath}/${parsed.data.post_id}`)
   return { error: null, id: reply?.id }
+}
+
+/**
+ * Background referral extraction — runs after replyToPost returns.
+ * Writes to referral_responses_business or _community via service-role.
+ * All errors swallowed — the reply already succeeded.
+ */
+async function runReferralExtraction(input: {
+  replyId: string
+  postId: string
+  content: string
+  memberId: string
+  boardType: 'business' | 'community'
+}): Promise<void> {
+  try {
+    const referrals = await extractReferralsFromReply(input.content)
+    if (referrals.length === 0) return
+
+    const svc = adminDb()
+    const table = input.boardType === 'community'
+      ? 'referral_responses_community'
+      : 'referral_responses_business'
+
+    for (const r of referrals) {
+      // Embed the referral text so similarity search can find it later.
+      const embedText = [r.referred_name, r.referred_category, r.referred_location, r.full_text]
+        .filter(Boolean).join(' ')
+      const embedding = await getEmbedding(embedText)
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (svc as any).from(table).insert({
+        source_post_id: input.postId,
+        source_response_id: input.replyId,
+        referrer_member_id: input.memberId,
+        referred_name: r.referred_name,
+        referred_category: r.referred_category,
+        referred_location: r.referred_location,
+        full_text: r.full_text,
+        embedding: embedding ?? null,
+        relevance_score: 0,
+        tenant_id: currentTenant(),
+      })
+      if (error) {
+        console.error('[referral-extract] insert failed:', error.message, { referral: r.referred_name })
+      }
+    }
+  } catch (err) {
+    console.error('[referral-extract] background job failed:', err)
+  }
 }
 
 // ── Post lifecycle ─────────────────────────────────────────────
@@ -312,9 +411,9 @@ export async function markFulfilled(postId: string): Promise<{ error: string | n
   const db = supabase as any
   const { data: post } = await db
     .from('bulletin_posts')
-    .select('id, member_id, status')
+    .select('id, member_id, status, board_type')
     .eq('id', postId)
-    .maybeSingle() as { data: { id: string; member_id: string; status: string } | null }
+    .maybeSingle() as { data: { id: string; member_id: string; status: string; board_type: string } | null }
   if (!post) return { error: 'Post not found' }
   if (post.member_id !== user.id) return { error: 'Only the post author can mark it fulfilled' }
   if (post.status !== 'open') return { error: `Post is already ${post.status}` }
@@ -325,9 +424,153 @@ export async function markFulfilled(postId: string): Promise<{ error: string | n
     .eq('id', postId)
   if (error) return { error: error.message }
 
-  revalidatePath(`/bulletin/${postId}`)
-  revalidatePath('/bulletin')
+  const fulfillBasePath = post.board_type === 'community' ? '/community' : '/bulletin'
+  revalidatePath(`${fulfillBasePath}/${postId}`)
+  revalidatePath(fulfillBasePath)
   return { error: null }
+}
+
+/**
+ * F18 satisfaction feedback: increment relevance_score on the referral the
+ * member found most helpful. Called from the post-fulfilled dialog when
+ * the poster picks "this past referral helped me."
+ *
+ * Higher relevance_score = surfaces earlier in future similarity searches.
+ * The increment is small (+0.1) so a single vote doesn't dominate but
+ * repeated helpfulness signals compound meaningfully.
+ */
+export async function updateReferralRelevance(
+  referralId: string,
+  boardType: 'business' | 'community'
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return { error: 'Server not configured' }
+  const svc = adminDb()
+  const table = boardType === 'community'
+    ? 'referral_responses_community'
+    : 'referral_responses_business'
+
+  // Fetch current score, increment by 0.1, update. Two queries is fine here —
+  // this is a low-frequency event (marks-fulfilled happen rarely) and we
+  // don't need atomic precision on a floating-point hint score.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: row } = await (svc as any)
+    .from(table)
+    .select('id, relevance_score')
+    .eq('id', referralId)
+    .maybeSingle() as { data: { id: string; relevance_score: number } | null }
+
+  if (row) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (svc as any)
+      .from(table)
+      .update({ relevance_score: (row.relevance_score ?? 0) + 0.1 })
+      .eq('id', referralId)
+  }
+  // Best-effort — relevance update failure must never block the UI.
+  return { error: null }
+}
+
+// ── Community member notification engine ───────────────────────
+// F05: finds verified members (not sponsors) in the same country
+// and emails them about the community ask.
+
+async function notifyMembersGeo(input: {
+  postId: string
+  country: string
+  city: string | null
+  postTitle: string
+  posterName: string
+  posterId: string
+  siteUrl: string
+}): Promise<Array<{ id: string; name: string }>> {
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return []
+  const svc = adminDb()
+
+  type MemberRow = {
+    id: string
+    full_name: string
+    eo_membership_email: string | null
+    verification_tag: string | null
+    country: string | null
+  }
+
+  // Verified non-sponsor members in the same country, excluding the poster.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: candidates } = await (svc as any)
+    .from('profiles')
+    .select('id, full_name, eo_membership_email, verification_tag, country')
+    .eq('status', 'active')
+    .eq('tenant_id', currentTenant())
+    .ilike('country', input.country)
+    .neq('id', input.posterId)
+    .in('verification_tag', ['eo_member', 'eo_accelerator', 'eo_alumni', 'ypo_member', 'ypo_alumni'])
+    .limit(50) as { data: MemberRow[] | null }
+
+  if (!candidates || candidates.length === 0) return []
+
+  // Sort by verification tier (highest first), cap at 6.
+  const sorted = [...candidates].sort((a, b) => {
+    const aTier = VERIFICATION_TIER[a.verification_tag ?? 'unverified'] ?? 99
+    const bTier = VERIFICATION_TIER[b.verification_tag ?? 'unverified'] ?? 99
+    return aTier - bTier
+  }).slice(0, 6)
+
+  const postUrl = `${input.siteUrl}/community/${input.postId}`
+
+  for (const member of sorted) {
+    const email = member.eo_membership_email
+    if (!email) continue
+    sendEmail({
+      to: email,
+      subject: `Community ask in ${input.country}: "${input.postTitle}"`,
+      html: communityAskEmailHtml({
+        recipientName: member.full_name,
+        posterName: input.posterName,
+        postTitle: input.postTitle,
+        postUrl,
+        country: input.country,
+      }),
+    }).catch(err => console.error('[community-match] email failed for', member.id, err))
+  }
+
+  return sorted.map(m => ({ id: m.id, name: m.full_name }))
+}
+
+function communityAskEmailHtml(input: {
+  recipientName: string
+  posterName: string
+  postTitle: string
+  postUrl: string
+  country: string
+}) {
+  const { recipientName, posterName, postTitle, postUrl, country } = input
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f9f6f0;">
+  <div style="max-width:560px;margin:40px auto;background:white;border-radius:12px;padding:32px;box-shadow:0 2px 8px rgba(0,0,0,0.04);">
+    <h1 style="font-size:18px;margin:0 0 12px;">Hi ${esc(recipientName)} — a member in ${esc(country)} needs some help</h1>
+    <div style="background:#f4f1ec;border-left:4px solid #0A5C46;padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0;">
+      <p style="margin:0;font-size:15px;font-weight:600;">${esc(postTitle)}</p>
+      <p style="margin:4px 0 0;font-size:13px;color:#666;">Posted by ${esc(posterName)}</p>
+    </div>
+    <p style="font-size:14px;color:#444;line-height:1.5;">
+      This is a community ask from a fellow member in your area. If you have relevant experience, contacts, or can help in any way, head to the thread and reply.
+    </p>
+    <p style="margin-top:24px;">
+      <a href="${postUrl}" style="background:#0A2218;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;">
+        View the ask &amp; reply
+      </a>
+    </p>
+    <p style="font-size:12px;color:#999;margin-top:32px;border-top:1px solid #eee;padding-top:16px;">
+      You received this because you're a verified member in the same country as the poster.
+    </p>
+  </div>
+</body></html>`
 }
 
 export async function extendPost(postId: string): Promise<{ error: string | null }> {
@@ -339,9 +582,9 @@ export async function extendPost(postId: string): Promise<{ error: string | null
   const db = supabase as any
   const { data: post } = await db
     .from('bulletin_posts')
-    .select('id, member_id, status, required_by')
+    .select('id, member_id, status, required_by, board_type')
     .eq('id', postId)
-    .maybeSingle() as { data: { id: string; member_id: string; status: string; required_by: string } | null }
+    .maybeSingle() as { data: { id: string; member_id: string; status: string; required_by: string; board_type: string } | null }
   if (!post) return { error: 'Post not found' }
   if (post.member_id !== user.id) return { error: 'Only the post author can extend it' }
   if (post.status !== 'open') return { error: 'Only open posts can be extended' }
@@ -357,6 +600,7 @@ export async function extendPost(postId: string): Promise<{ error: string | null
     .eq('id', postId)
   if (error) return { error: error.message }
 
-  revalidatePath(`/bulletin/${postId}`)
+  const extendBasePath = post.board_type === 'community' ? '/community' : '/bulletin'
+  revalidatePath(`${extendBasePath}/${postId}`)
   return { error: null }
 }
