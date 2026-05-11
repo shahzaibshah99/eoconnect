@@ -112,6 +112,11 @@ export async function proxy(request: NextRequest) {
     return response
   }
 
+  // Non-suspended users who manually navigate to /suspended get bounced out.
+  if (pathname === '/suspended') {
+    return redirectTo('/marketplace')
+  }
+
   if (pathname.startsWith('/admin')) {
     if (!profile || !['chapter_admin', 'super_admin'].includes(profile.role)) {
       return redirectTo('/dashboard')
