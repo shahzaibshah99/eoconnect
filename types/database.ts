@@ -76,6 +76,9 @@ export interface Business {
   slow_replier: boolean
   /** F03: true while a pre-populated listing is awaiting a real-member claim. */
   is_pre_populated: boolean
+  /** F09: verification tag inherited from the owner at approval time.
+   *  Drives search ranking tier. Defaults to 'unverified'. */
+  verification_tag: VerificationTag
   created_at: string
   updated_at: string
 }

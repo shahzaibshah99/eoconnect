@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
-import { useState, useTransition, useEffect } from 'react'
+import { useState, useTransition } from 'react'
 import { Search, Sparkles, Loader2 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -17,19 +17,26 @@ export function SearchBar({ defaultValue = '' }: { defaultValue?: string }) {
   // the new server component has streamed in, so we get a real
   // "searching" indicator the whole time, not just at form submit.
 
-  // Sync local input when the URL's q changes (e.g. browser back/forward).
-  useEffect(() => {
-    const q = searchParams.get('q') ?? ''
-    setQuery(q)
-  }, [searchParams])
+  // Sync local input when the URL's q changes (browser back/forward).
+  // React docs pattern: track the previous value with useState and reset
+  // synchronously during render — avoids the useEffect setState lint rule.
+  const [prevQ, setPrevQ] = useState(searchParams.get('q'))
+  const urlQ = searchParams.get('q') ?? ''
+  if (prevQ !== urlQ) {
+    setPrevQ(urlQ)
+    setQuery(urlQ)
+  }
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     const trimmed = query.trim()
-    if (!trimmed) return
+    // Empty search → browse all listings (ranked by tier). Don't block it —
+    // the search page handles no-query mode and applies Member Market ranking.
     const params = new URLSearchParams()
-    params.set('q', trimmed)
-    params.set('smart', '1')
+    if (trimmed) {
+      params.set('q', trimmed)
+      params.set('smart', '1')
+    }
     startTransition(() => {
       router.push(`/marketplace/search?${params.toString()}`)
     })
@@ -58,7 +65,7 @@ export function SearchBar({ defaultValue = '' }: { defaultValue?: string }) {
       </div>
       <Button
         type="submit"
-        disabled={isPending || !query.trim()}
+        disabled={isPending}
         className="h-12 bg-primary text-primary-foreground font-bold px-6 gap-1.5"
       >
         {isPending ? (

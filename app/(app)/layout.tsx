@@ -4,6 +4,7 @@ import { Navbar } from '@/components/layout/navbar'
 import { Footer } from '@/components/layout/footer'
 import { ADS_ENABLED } from '@/lib/feature-flags'
 import type { NotificationItem } from '@/components/layout/notifications-button'
+import { CURRENT_TERMS_VERSION } from '@/lib/terms-constants'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -23,7 +24,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // separately localises the blast radius of a missing column to
   // just the feature that depends on it (notifications bell).
   const [{ data: profile }, { data: convs }, { data: ownedBusinesses }, { count: cmAssignmentCount }] = await Promise.all([
-    supabase.from('profiles').select('id, full_name, avatar_url, eo_chapter, role, status').eq('id', user.id).single(),
+    // Include terms_version so we can gate access below. Wrapping it in
+    // the same query avoids an extra round-trip and keeps the profile
+    // fetch stable — if the column is missing (migration 032 not applied),
+    // it returns null and we skip the gate gracefully.
+    supabase.from('profiles').select('id, full_name, avatar_url, eo_chapter, role, status, terms_version').eq('id', user.id).single(),
     db.from('conversations').select('id').contains('participant_ids', [user.id]) as Promise<{ data: Array<{ id: string }> | null }>,
     db.from('businesses').select('id, name').eq('owner_id', user.id) as Promise<{
       data: Array<{ id: string; name: string }> | null
@@ -35,6 +40,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       count: number | null
     }>,
   ])
+
+  // T&C gate — per scope F06: first login cannot skip terms.
+  // If migration 032 hasn't run yet, terms_version comes back undefined
+  // (column missing) which we treat as null → gate skipped gracefully.
+  // Cast needed because profile.terms_version isn't in the Profile type
+  // (backwards-compat: existing types don't include new columns).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const acceptedVersion = (profile as any)?.terms_version ?? null
+  if (profile && (acceptedVersion === null || acceptedVersion < CURRENT_TERMS_VERSION)) {
+    redirect('/terms-accept')
+  }
 
   // Separate, optional fetch for notifications_seen_at. Wrapped so
   // a missing column / unapplied migration just returns null instead

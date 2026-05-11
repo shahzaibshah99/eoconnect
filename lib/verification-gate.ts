@@ -47,6 +47,10 @@ export async function requireVerified(
       reason: 'Verify your membership first. Go to /dashboard/verify to submit a screenshot of your member profile.',
     }
   }
+  // Per scope F06 L2 hierarchy: Sponsors cannot post, endorse, or message.
+  if (profile.verification_tag === 'eo_sponsor' || profile.verification_tag === 'ypo_sponsor') {
+    return { ok: false, reason: 'Sponsor accounts cannot send messages or inquiries on this platform.' }
+  }
   return { ok: true }
 }
 

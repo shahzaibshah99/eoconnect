@@ -3,17 +3,17 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { sendInquiry } from '@/actions/messages'
 import { toast } from 'sonner'
+import { MessageCircle } from 'lucide-react'
 
 interface ServiceOption {
   id: string
   title: string
+  item_type?: string | null
 }
 
 interface InquiryDialogProps {
@@ -25,14 +25,15 @@ interface InquiryDialogProps {
 }
 
 /**
- * R2-06: Send Inquiry modal. Replaces the old "click does nothing visible" flow.
+ * Per scope F06: "Viewer taps 'Enquire about this listing' → selects
+ * service/product of interest (provides context, no free text) →
+ * confirm → in-platform message thread opens."
  *
- * On submit:
- *   1. Calls sendInquiry — creates/reuses a conversation AND sends the message in one go
- *   2. Shows a confirmation toast inside the modal, then redirects to the conversation
- *      so the user can immediately see their message + continue chatting
- *
- * The modal trigger is the existing "Send Inquiry" button on the listing page.
+ * Key changes from the old dialog:
+ *   - Free-text message body removed. Inquiry = service selection only.
+ *   - Auto-generated opening message: "I'm interested in [service]."
+ *   - No accept/decline step — thread opens directly on submit.
+ *   - If the listing has no services, the inquiry opens a general thread.
  */
 export function InquiryDialog({
   businessId, ownerId, ownerName, businessName, services,
@@ -40,33 +41,32 @@ export function InquiryDialog({
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [serviceId, setServiceId] = useState<string>(services[0]?.id ?? '')
-  const [body, setBody] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
+  // Derive the selected service label for the confirmation preview.
+  const selectedService = services.find(s => s.id === serviceId)
+
   const submit = () => {
     setError(null)
-    if (!body.trim()) {
-      setError('Add a short message so the owner knows what you’re asking about.')
-      return
-    }
     startTransition(async () => {
+      // Auto-generate the opening message from the service selection.
+      // No free text per scope — the service pick IS the context.
+      const firstName = ownerName.split(' ')[0] || ownerName
+      const autoBody = selectedService
+        ? `Hi ${firstName}, I'm interested in your ${selectedService.item_type === 'product' ? 'product' : 'service'}: "${selectedService.title}".`
+        : `Hi ${firstName}, I'd like to learn more about ${businessName}.`
+
       const res = await sendInquiry({
         owner_id: ownerId,
         business_id: businessId,
         service_id: serviceId || null,
-        body: body.trim(),
+        body: autoBody,
       })
-      if (res.error) {
-        setError(res.error)
-        return
-      }
+      if (res.error) { setError(res.error); return }
       setOpen(false)
-      // Pre-populated listings have no real owner yet — the action emailed
-      // the invite address with a claim link. Surface that to the user
-      // rather than dropping them into an empty messages page.
       if (res.pendingClaim) {
-        toast.success("We've passed your message to the business — we'll let them know to claim their listing and reply.")
+        toast.success("We've let the business know someone is interested — they'll respond once they claim their profile.")
         return
       }
       if (res.conversationId) {
@@ -81,67 +81,97 @@ export function InquiryDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
         render={
-          <Button className="w-full bg-primary text-primary-foreground font-bold" />
+          <Button className="w-full bg-primary text-primary-foreground font-bold gap-1.5" />
         }
       >
-        Send Inquiry
+        <MessageCircle className="h-4 w-4" /> Enquire about this listing
       </DialogTrigger>
+
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Inquire about {businessName}</DialogTitle>
+          <DialogTitle>Enquire about {businessName}</DialogTitle>
         </DialogHeader>
+
         <div className="space-y-4 py-2">
           <p className="text-sm text-muted-foreground">
-            Send a message directly to {ownerName}. They’ll reply in your Messages inbox.
+            Select what you&apos;re interested in. {ownerName.split(' ')[0]} will receive a
+            notification and can reply in your Messages inbox.
           </p>
 
-          {services.length > 0 && (
-            <div className="space-y-1.5">
-              <Label htmlFor="service_id">Which service are you interested in?</Label>
-              <Select value={serviceId || undefined} onValueChange={(v: string | null) => setServiceId(v ?? '')}>
-                <SelectTrigger id="service_id" className="w-full h-10">
-                  <SelectValue placeholder="Pick a service…">
-                    {/* base-ui's Select renders the raw value (a UUID) by default —
-                        map it back to the human-readable service title here. */}
-                    {(v: string | null) => services.find(s => s.id === v)?.title ?? 'Pick a service…'}
+          {services.length > 0 ? (
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground block">
+                What are you interested in?
+              </label>
+              <Select
+                value={serviceId || undefined}
+                onValueChange={(v: string | null) => setServiceId(v ?? '')}
+              >
+                <SelectTrigger className="w-full h-10">
+                  <SelectValue placeholder="Select a service or product…">
+                    {(v: string | null) => {
+                      const s = services.find(s => s.id === v)
+                      if (!s) return 'Select a service or product…'
+                      return (
+                        <span>
+                          {s.item_type === 'product' ? '📦' : '⚙️'}{' '}
+                          {s.title}
+                        </span>
+                      )
+                    }}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {services.map(s => (
-                    <SelectItem key={s.id} value={s.id}>{s.title}</SelectItem>
+                    <SelectItem key={s.id} value={s.id}>
+                      <span className="flex items-center gap-2">
+                        <span>{s.item_type === 'product' ? '📦' : '⚙️'}</span>
+                        <span>{s.title}</span>
+                        {s.item_type && (
+                          <span className="text-[10px] text-muted-foreground capitalize">
+                            ({s.item_type})
+                          </span>
+                        )}
+                      </span>
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+          ) : (
+            <div className="bg-muted/40 border border-border rounded-lg p-3 text-sm text-muted-foreground">
+              This business hasn&apos;t listed specific services yet. Your enquiry will
+              open a general conversation.
+            </div>
           )}
 
-          <div className="space-y-1.5">
-            <Label htmlFor="body">Your message *</Label>
-            <Textarea
-              id="body"
-              rows={5}
-              value={body}
-              onChange={e => setBody(e.target.value)}
-              placeholder={`Hi ${ownerName.split(' ')[0] || ''}, I’m interested in…`}
-              maxLength={5000}
-            />
-            <p className="text-xs text-muted-foreground text-right">
-              {body.length} / 5000
-            </p>
-          </div>
-
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
+          {/* Preview of the auto-generated opening message */}
+          {(selectedService || services.length === 0) && (
+            <div className="bg-muted/30 border border-border rounded-lg p-3">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1 font-semibold">
+                Your opening message (auto-generated)
+              </p>
+              <p className="text-sm">
+                {selectedService
+                  ? `Hi ${ownerName.split(' ')[0] || ownerName}, I'm interested in your ${selectedService.item_type === 'product' ? 'product' : 'service'}: "${selectedService.title}".`
+                  : `Hi ${ownerName.split(' ')[0] || ownerName}, I'd like to learn more about ${businessName}.`
+                }
+              </p>
+            </div>
           )}
+
+          {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
         </div>
+
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)} disabled={isPending}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={isPending}>
-            {isPending ? 'Sending…' : 'Send inquiry'}
+          <Button
+            onClick={submit}
+            disabled={isPending || (services.length > 0 && !serviceId)}
+          >
+            {isPending ? 'Sending…' : 'Send enquiry'}
           </Button>
         </DialogFooter>
       </DialogContent>

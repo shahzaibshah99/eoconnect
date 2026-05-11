@@ -121,6 +121,16 @@ export default async function MarketplacePage() {
         <div className="flex justify-center mt-6">
           <SearchBar />
         </div>
+        {/* Browse all — visible below the search box, lets members reach
+            the ranked listing grid without typing a query first. */}
+        <div className="flex justify-center mt-3">
+          <Link
+            href="/marketplace/search"
+            className="text-sm text-muted-foreground hover:text-foreground hover:underline"
+          >
+            Browse all listings →
+          </Link>
+        </div>
       </section>
 
       {/* Trending in EO — featured mosaic */}

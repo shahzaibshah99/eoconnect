@@ -20,6 +20,52 @@ type SearchParams = {
   city?: string
   sort?: string
   smart?: string
+  // F09: new ranking-aware filter params
+  tag?: string          // verification_tag — 'eo_member' | 'eo_alumni' | etc.
+  team_size?: string    // businesses.team_size — '1-10' | '11-50' | etc.
+  item_type?: string    // 'service' | 'product' — filter to businesses that have at least one
+}
+
+// ── Member Market ranking ─────────────────────────────────────
+//
+// Per scope F09: results are re-ordered by (slow_replier, verification
+// tier, endorsement count, original relevance position).
+//
+// "Keyword relevance is #1" — preserved as the final tiebreaker.
+// Within the same tier/endorsement band, higher-similarity results
+// sit above lower-similarity ones (original array index is preserved).
+//
+// Slow replier listings rank LAST within each tier (not hidden).
+// VERIFICATION_TIER lives in lib/bulletin-constants.ts (shared with
+// the F04 bulletin matching engine).
+import { VERIFICATION_TIER } from '@/lib/bulletin-constants'
+
+function applyMemberMarketRanking(
+  results: Business[],
+  endorseMap: Map<string, number>
+): Business[] {
+  return [...results]
+    .map((b, idx) => ({ b, idx }))
+    .sort((x, y) => {
+      // 1. Slow replier penalty — always last within their tier
+      const xSlow = x.b.slow_replier ? 1 : 0
+      const ySlow = y.b.slow_replier ? 1 : 0
+      if (xSlow !== ySlow) return xSlow - ySlow
+
+      // 2. Verification tier (lower = better)
+      const xTier = VERIFICATION_TIER[x.b.verification_tag ?? 'unverified'] ?? 99
+      const yTier = VERIFICATION_TIER[y.b.verification_tag ?? 'unverified'] ?? 99
+      if (xTier !== yTier) return xTier - yTier
+
+      // 3. Endorsement count (higher = better)
+      const xEnd = endorseMap.get(x.b.id) ?? 0
+      const yEnd = endorseMap.get(y.b.id) ?? 0
+      if (xEnd !== yEnd) return yEnd - xEnd
+
+      // 4. Original position (preserves vector similarity ordering)
+      return x.idx - y.idx
+    })
+    .map(({ b }) => b)
 }
 
 interface SearchPageProps {
@@ -74,6 +120,27 @@ async function SearchResults({ searchParams }: SearchPageProps) {
     ? categories.filter((c: { slug: string; id: string }) => urlSlugs.includes(c.slug)).map((c: { id: string }) => c.id)
     : []
 
+  // F09 new filters
+  const tagFilter = params.tag?.trim() || null       // verification_tag exact match
+  const teamSizeFilter = params.team_size?.trim() || null   // team_size exact match
+  const itemTypeFilter = (params.item_type === 'service' || params.item_type === 'product')
+    ? params.item_type : null
+
+  // If item_type filter is active, pre-fetch business IDs that have at
+  // least one service/product of that type. Null = no filter.
+  let itemTypeBusinessIds: string[] | null = null
+  if (itemTypeFilter) {
+    const { data: svcRows } = await db
+      .from('services')
+      .select('business_id')
+      .eq('status', 'published')
+      .eq('item_type', itemTypeFilter) as { data: Array<{ business_id: string }> | null }
+    itemTypeBusinessIds = [...new Set((svcRows ?? []).map(r => r.business_id))]
+    // Zero matches → no results can satisfy this filter. Short-circuit
+    // by pushing an impossible ID instead of letting the IN([]) fail.
+    if (itemTypeBusinessIds.length === 0) itemTypeBusinessIds = ['00000000-0000-0000-0000-000000000000']
+  }
+
   // Resolve region → list of country names via the eo_chapters
   // reference table. The user wants the BUSINESS's location to
   // determine region membership, not the owner's profile region —
@@ -105,16 +172,8 @@ async function SearchResults({ searchParams }: SearchPageProps) {
     if (cityHard) q = q.ilike('city', `%${cityHard}%`)
     if (countriesInRegion !== null) {
       if (countriesInRegion.length === 0) {
-        // No EO chapters in this region (impossible with current
-        // seed data, but defensive). Short-circuit to zero rows
-        // rather than silently drop the filter.
         q = q.eq('id', '00000000-0000-0000-0000-000000000000')
       } else {
-        // OR each country with ILIKE so casing/whitespace differences
-        // ("United States" vs "united states") don't miss matches.
-        // PostgREST's .or() takes a comma-joined string of conditions.
-        // Country names with commas don't appear in the eo_chapters
-        // seed, but escape them defensively just in case.
         const orFilter = countriesInRegion
           .map(c => `country.ilike.${c.replace(/,/g, '\\,')}`)
           .join(',')
@@ -122,6 +181,10 @@ async function SearchResults({ searchParams }: SearchPageProps) {
       }
     }
     if (hardCatIds.length > 0) q = q.overlaps('category_ids', hardCatIds)
+    // F09 new filters
+    if (tagFilter) q = q.eq('verification_tag', tagFilter)
+    if (teamSizeFilter) q = q.eq('team_size', teamSizeFilter)
+    if (itemTypeBusinessIds) q = q.in('id', itemTypeBusinessIds)
     return q
   }
 
@@ -253,21 +316,36 @@ async function SearchResults({ searchParams }: SearchPageProps) {
       },
     }))
   } else {
-    // No query — list mode (newest first, respecting filters)
+    // No query — list mode. Fetch and rank by tier → endorsements → recency.
+    // Cap at 100 so ranking has enough candidates to work with before slicing.
     const { data: rows } = await buildBase()
       .order('created_at', { ascending: false })
-      .limit(50) as { data: Business[] | null }
+      .limit(100) as { data: Business[] | null }
     results = rows ?? []
   }
 
-  // Sort overrides
+  // ── Sort / Ranking ──────────────────────────────────────────
   const sort = params.sort ?? 'relevance'
   if (sort === 'alpha') {
     results = [...results].sort((a, b) => a.name.localeCompare(b.name))
   } else if (sort === 'newest') {
     results = [...results].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
+  } else {
+    // 'relevance' mode — apply Member Market tier ranking.
+    // Endorsement counts are needed first; fetch them in a single batch.
+    const allBusinessIds = results.map(b => b.id)
+    const endorseMap = new Map<string, number>()
+    if (allBusinessIds.length > 0) {
+      const { data: endorseRows } = await db
+        .from('endorsements')
+        .select('business_id')
+        .in('business_id', allBusinessIds) as { data: Array<{ business_id: string }> | null }
+      for (const r of endorseRows ?? []) {
+        endorseMap.set(r.business_id, (endorseMap.get(r.business_id) ?? 0) + 1)
+      }
+    }
+    results = applyMemberMarketRanking(results, endorseMap)
   }
-  // 'relevance' keeps the embedding-similarity ordering.
 
   // Pull review aggregates for every business we'll render so the
   // card can show "★ 4.6 (12)". Single round-trip, then bucket in JS.

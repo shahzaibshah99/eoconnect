@@ -12,6 +12,27 @@ interface FilterPanelProps {
   categories: Category[]
 }
 
+// F09: Verification tag options shown in the Member Type filter.
+// Labels are human-friendly; values match businesses.verification_tag.
+const MEMBER_TYPE_OPTIONS = [
+  { value: 'eo_member',      label: 'EO Member' },
+  { value: 'eo_accelerator', label: 'EO Accelerator' },
+  { value: 'eo_alumni',      label: 'EO Alumni' },
+  { value: 'eo_sponsor',     label: 'EO Sponsor' },
+  { value: 'ypo_member',     label: 'YPO Member' },
+  { value: 'ypo_alumni',     label: 'YPO Alumni' },
+  { value: 'ypo_sponsor',    label: 'YPO Sponsor' },
+] as const
+
+// F09: Team size options matching the TeamSize enum in types/database.ts
+const TEAM_SIZE_OPTIONS = [
+  { value: '1-10',    label: '1–10 people' },
+  { value: '11-50',   label: '11–50 people' },
+  { value: '51-200',  label: '51–200 people' },
+  { value: '201-500', label: '201–500 people' },
+  { value: '500+',    label: '500+ people' },
+] as const
+
 // The 11 canonical EO regions. Mirrors the check constraint on
 // profiles.region from migration 008. Filter selection uses these
 // values verbatim and the search page resolves them by joining
@@ -62,6 +83,10 @@ export function FilterPanel({ categories }: FilterPanelProps) {
   const selectedCategories = searchParams.getAll('category')
   const selectedCountry = searchParams.get('country') ?? ''
   const selectedSort = searchParams.get('sort') ?? 'relevance'
+  // F09 new filters
+  const selectedTag = searchParams.get('tag') ?? ''
+  const selectedTeamSize = searchParams.get('team_size') ?? ''
+  const selectedItemType = searchParams.get('item_type') ?? ''
 
   return (
     <div className="space-y-6">
@@ -99,6 +124,63 @@ export function FilterPanel({ categories }: FilterPanelProps) {
             {REGIONS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
           </SelectContent>
         </Select>
+      </div>
+
+      {/* F09: Member type (verification_tag) */}
+      <div>
+        <Label className="text-xs uppercase tracking-wide text-muted-foreground mb-3 block">Member type</Label>
+        <Select value={selectedTag} onValueChange={(v) => updateFilter('tag', v ?? '')}>
+          <SelectTrigger className="h-9">
+            <SelectValue placeholder="Any member type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Any member type</SelectItem>
+            {MEMBER_TYPE_OPTIONS.map(o => (
+              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* F09: Team size */}
+      <div>
+        <Label className="text-xs uppercase tracking-wide text-muted-foreground mb-3 block">Team size</Label>
+        <Select value={selectedTeamSize} onValueChange={(v) => updateFilter('team_size', v ?? '')}>
+          <SelectTrigger className="h-9">
+            <SelectValue placeholder="Any size" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Any size</SelectItem>
+            {TEAM_SIZE_OPTIONS.map(o => (
+              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* F09: Service or Product */}
+      <div>
+        <Label className="text-xs uppercase tracking-wide text-muted-foreground mb-3 block">Listing type</Label>
+        <div className="flex gap-1">
+          {([
+            { value: '', label: 'All' },
+            { value: 'service', label: 'Services' },
+            { value: 'product', label: 'Products' },
+          ] as const).map(o => (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => updateFilter('item_type', o.value)}
+              className={`flex-1 h-8 rounded-md border text-xs font-medium transition-colors ${
+                selectedItemType === o.value
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border hover:bg-muted'
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div>

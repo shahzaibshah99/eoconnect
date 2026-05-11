@@ -29,6 +29,7 @@ const FacebookIcon = (props: React.SVGProps<SVGSVGElement>) => (
   </svg>
 )
 import { InquiryDialog } from '@/components/marketplace/inquiry-dialog'
+import { FlagDialog } from '@/components/marketplace/flag-dialog'
 import { externalUrl } from '@/lib/external-url'
 import { ReviewForm } from '@/components/reviews/review-form'
 import { ReviewCard, type ReviewCardItem } from '@/components/reviews/review-card'
@@ -246,13 +247,25 @@ export default async function ListingDetailPage({ params }: ListingDetailProps) 
                   ownerId={business.owner_id}
                   ownerName={business.profiles?.full_name ?? 'the owner'}
                   businessName={business.name}
-                  services={services.map((s: { id: string; title: string }) => ({ id: s.id, title: s.title }))}
+                  services={(services as Array<{ id: string; title: string; item_type?: string | null }>).map(s => ({
+                    id: s.id, title: s.title, item_type: s.item_type ?? null,
+                  }))}
                 />
               ) : (
                 <p className="text-xs text-muted-foreground text-center px-2 py-3 border border-dashed border-border rounded-lg">
-                  This member hasn’t listed any services yet.
+                  This member hasn&apos;t listed any services yet.
                 </p>
               )
+            )}
+            {/* Flag this listing — per scope F06. Hidden from the listing owner. */}
+            {user && !isOwner && (
+              <div className="flex justify-end pt-1">
+                <FlagDialog
+                  targetType="listing"
+                  targetId={business.id}
+                  targetLabel={business.name}
+                />
+              </div>
             )}
 
             {(() => {

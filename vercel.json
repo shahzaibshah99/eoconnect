@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/slow-replier-nudges",
       "schedule": "17 9 * * *"
+    },
+    {
+      "path": "/api/cron/bulletin-expiry",
+      "schedule": "17 2 * * *"
     }
   ]
 }
