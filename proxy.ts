@@ -167,6 +167,7 @@ export async function proxy(request: NextRequest) {
       exemptFromOnboardingGate ||
       pathname.startsWith('/dashboard/business/new') ||
       pathname.startsWith('/dashboard/verify') ||
+      pathname.startsWith('/dashboard/get-started') ||
       pathname.startsWith('/admin')
 
     if (!exemptFromBusinessGate && p.eo_membership_type && p.region) {
@@ -181,7 +182,10 @@ export async function proxy(request: NextRequest) {
         .limit(1) as { data: Array<{ id: string }> | null; error: unknown }
 
       if (!businesses || businesses.length === 0) {
-        return redirectTo('/dashboard/business/new')
+        // Send new users to the get-started page which explains verification
+        // first, then listing creation — rather than dropping them straight
+        // into the business wizard with no context.
+        return redirectTo('/dashboard/get-started')
       }
     }
   }
