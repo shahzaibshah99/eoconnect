@@ -166,6 +166,7 @@ export async function proxy(request: NextRequest) {
     const exemptFromBusinessGate =
       exemptFromOnboardingGate ||
       pathname.startsWith('/dashboard/business/new') ||
+      pathname.startsWith('/dashboard/verify') ||
       pathname.startsWith('/admin')
 
     if (!exemptFromBusinessGate && p.eo_membership_type && p.region) {
