@@ -213,6 +213,128 @@ export async function submitChapterCsvImport(input: unknown): Promise<{
   return { error: null, id: row.id }
 }
 
+// ── Sponsor POC nomination ────────────────────────────────────
+//
+// Per scope F17: CM can set a named point-of-contact (email) on a
+// sponsor listing in their chapter. That email receives inquiry
+// notifications (the business.email field is the inquiry destination).
+
+const SponsorPocSchema = z.object({
+  business_id: z.string().uuid(),
+  chapter_id: z.number().int(),
+  poc_name: z.string().trim().max(120).optional(),
+  poc_email: z.string().trim().email('Invalid email').optional(),
+})
+
+export async function updateSponsorPoc(input: unknown): Promise<{ error: string | null }> {
+  const parsed = SponsorPocSchema.safeParse(input)
+  if (!parsed.success) return { error: parsed.error.issues[0].message }
+
+  const ctx = await requireChapterManager(parsed.data.chapter_id)
+  if (ctx.error) return { error: ctx.error }
+
+  const svc = adminDb()
+
+  // Verify the business is actually a sponsor in this chapter.
+  const { data: biz } = await svc
+    .from('businesses')
+    .select('id, name, verification_tag')
+    .eq('id', parsed.data.business_id)
+    .eq('verification_tag', 'eo_sponsor')
+    .maybeSingle() as { data: { id: string; name: string; verification_tag: string } | null }
+  if (!biz) return { error: 'Sponsor listing not found or not an EO sponsor' }
+
+  const updates: Record<string, string | null> = {}
+  if (parsed.data.poc_email !== undefined) updates.email = parsed.data.poc_email
+  if (Object.keys(updates).length === 0) return { error: 'No changes to save' }
+
+  const { error } = await svc
+    .from('businesses')
+    .update(updates)
+    .eq('id', parsed.data.business_id) as { error: { message: string } | null }
+  if (error) return { error: error.message }
+
+  await logEvent(svc, 'sponsor_poc_updated', ctx.user!.id, parsed.data.business_id, {
+    chapter_id: parsed.data.chapter_id,
+    poc_name: parsed.data.poc_name ?? null,
+    poc_email: parsed.data.poc_email ?? null,
+  })
+
+  revalidatePath(`/chapter-manager/${parsed.data.chapter_id}/sponsors`)
+  return { error: null }
+}
+
+// ── Profile transfer ──────────────────────────────────────────
+//
+// Per scope F17: CM can transfer a member profile they created to the
+// member by sending them a claim email. Once claimed, the CM loses
+// edit access. Full audit trail: created_by, invite_sent_at,
+// claimed_by, claimed_at — all in events_log.
+
+const TransferSchema = z.object({
+  business_id: z.string().uuid(),
+  chapter_id: z.number().int(),
+  recipient_email: z.string().trim().email('Invalid recipient email'),
+})
+
+export async function initiateProfileTransfer(input: unknown): Promise<{ error: string | null }> {
+  const parsed = TransferSchema.safeParse(input)
+  if (!parsed.success) return { error: parsed.error.issues[0].message }
+
+  const ctx = await requireChapterManager(parsed.data.chapter_id)
+  if (ctx.error) return { error: ctx.error }
+
+  const svc = adminDb()
+  const { randomBytes } = await import('crypto')
+  const { sendEmail, claimReminderEmail } = await import('@/lib/email/send')
+  const { siteUrl } = await import('@/lib/site-url')
+
+  // Verify the business exists. CM can transfer listings they own
+  // OR listings that have no owner yet (pre-populated by CSV).
+  const { data: biz } = await svc
+    .from('businesses')
+    .select('id, name, owner_id, claimed_at, claim_token')
+    .eq('id', parsed.data.business_id)
+    .maybeSingle() as {
+    data: { id: string; name: string; owner_id: string | null; claimed_at: string | null; claim_token: string | null } | null
+  }
+  if (!biz) return { error: 'Business not found' }
+  if (biz.claimed_at) return { error: 'This listing has already been claimed by someone' }
+  if (biz.owner_id && biz.owner_id !== ctx.user!.id) {
+    return { error: 'This listing is owned by another member — only an admin can transfer it' }
+  }
+
+  // Generate a fresh claim token.
+  const claim_token = randomBytes(32).toString('hex')
+  const expires_at = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString()
+
+  const { error: updateErr } = await svc
+    .from('businesses')
+    .update({
+      claim_token,
+      claim_token_expires_at: expires_at,
+      is_pre_populated: true,
+      email: parsed.data.recipient_email,
+    })
+    .eq('id', biz.id) as { error: { message: string } | null }
+  if (updateErr) return { error: updateErr.message }
+
+  const claimUrl = `${siteUrl()}/claim/${claim_token}`
+  const tpl = claimReminderEmail('there', biz.name, 60, claimUrl)
+  await sendEmail({ to: parsed.data.recipient_email, subject: tpl.subject, html: tpl.html }).catch(err => {
+    console.error('[chapter-manager] transfer claim email failed:', err)
+  })
+
+  await logEvent(svc, 'profile_transfer_initiated', ctx.user!.id, biz.id, {
+    chapter_id: parsed.data.chapter_id,
+    recipient_email: parsed.data.recipient_email,
+    business_name: biz.name,
+  })
+
+  revalidatePath(`/chapter-manager/${parsed.data.chapter_id}/members`)
+  return { error: null }
+}
+
 // ── Member search (within chapter scope) ──────────────────────
 
 export interface ChapterMemberSearchResult {

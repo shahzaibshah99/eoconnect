@@ -148,6 +148,7 @@ export async function proxy(request: NextRequest) {
       pathname.startsWith('/auth') ||
       pathname.startsWith('/api') ||
       pathname.startsWith('/_next') ||
+      pathname.startsWith('/claim') ||
       pathname === '/'
 
     // The gate fires until both `eo_membership_type` and `region` are set —

@@ -24,6 +24,15 @@ const MEMBER_TYPE_OPTIONS = [
   { value: 'ypo_sponsor',    label: 'YPO Sponsor' },
 ] as const
 
+// Revenue range options matching the businesses.revenue_range field.
+const REVENUE_RANGE_OPTIONS = [
+  { value: 'under-1m',   label: 'Under $1M' },
+  { value: '1m-10m',     label: '$1M – $10M' },
+  { value: '10m-50m',    label: '$10M – $50M' },
+  { value: '50m-100m',   label: '$50M – $100M' },
+  { value: 'over-100m',  label: 'Over $100M' },
+] as const
+
 // F09: Team size options matching the TeamSize enum in types/database.ts
 const TEAM_SIZE_OPTIONS = [
   { value: '1-10',    label: '1–10 people' },
@@ -87,6 +96,7 @@ export function FilterPanel({ categories }: FilterPanelProps) {
   const selectedTag = searchParams.get('tag') ?? ''
   const selectedTeamSize = searchParams.get('team_size') ?? ''
   const selectedItemType = searchParams.get('item_type') ?? ''
+  const selectedRevenueRange = searchParams.get('revenue_range') ?? ''
 
   return (
     <div className="space-y-6">
@@ -181,6 +191,22 @@ export function FilterPanel({ categories }: FilterPanelProps) {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Revenue range */}
+      <div>
+        <Label className="text-xs uppercase tracking-wide text-muted-foreground mb-3 block">Revenue range</Label>
+        <Select value={selectedRevenueRange} onValueChange={(v) => updateFilter('revenue_range', v ?? '')}>
+          <SelectTrigger className="h-9">
+            <SelectValue placeholder="Any revenue" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Any revenue</SelectItem>
+            {REVENUE_RANGE_OPTIONS.map(o => (
+              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div>

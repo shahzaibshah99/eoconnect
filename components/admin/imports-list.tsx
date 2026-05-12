@@ -101,19 +101,47 @@ function ImportRowItem({ row }: { row: ImportRow }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [rejectOpen, setRejectOpen] = useState(false)
+  const [processResult, setProcessResult] = useState<{
+    created: number; skipped: number; rowErrors: string[]; emailErrors: string[]
+  } | null>(null)
+  const [processError, setProcessError] = useState<string | null>(null)
 
   const submitter = row.submitted
 
   const approve = () =>
     startTransition(async () => {
+      setProcessResult(null)
+      setProcessError(null)
       const res = await approveCsvImport(row.id)
-      if (!res.error) router.refresh()
+      if (res.error) {
+        setProcessError(res.error)
+      } else {
+        setProcessResult({
+          created: res.created ?? 0,
+          skipped: res.skipped ?? 0,
+          rowErrors: res.rowErrors ?? [],
+          emailErrors: res.emailErrors ?? [],
+        })
+        router.refresh()
+      }
     })
 
   const process = () =>
     startTransition(async () => {
+      setProcessResult(null)
+      setProcessError(null)
       const res = await markCsvImportProcessed(row.id)
-      if (!res.error) router.refresh()
+      if (res.error) {
+        setProcessError(res.error)
+      } else {
+        setProcessResult({
+          created: res.created ?? 0,
+          skipped: res.skipped ?? 0,
+          rowErrors: res.rowErrors ?? [],
+          emailErrors: res.emailErrors ?? [],
+        })
+        router.refresh()
+      }
     })
 
   return (
@@ -164,7 +192,8 @@ function ImportRowItem({ row }: { row: ImportRow }) {
           {row.status === 'pending' && (
             <>
               <Button size="sm" onClick={approve} disabled={isPending} className="gap-1.5">
-                <Check className="h-3.5 w-3.5" /> Approve
+                <Check className="h-3.5 w-3.5" />
+                {isPending ? 'Processing…' : 'Approve & create listings'}
               </Button>
               <Button
                 size="sm"
@@ -177,13 +206,49 @@ function ImportRowItem({ row }: { row: ImportRow }) {
               </Button>
             </>
           )}
+          {/* Fallback for imports that were approved before auto-process was added */}
           {row.status === 'approved' && (
             <Button size="sm" variant="outline" onClick={process} disabled={isPending} className="gap-1.5">
-              <PlayCircle className="h-3.5 w-3.5" /> Mark processed
+              <PlayCircle className="h-3.5 w-3.5" /> Create listings & send emails
             </Button>
           )}
         </div>
       </div>
+
+      {processError && (
+        <div className="mt-3 text-xs rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-red-700 dark:text-red-400">
+          <p className="font-semibold mb-1">Error — no listings created</p>
+          <p className="font-mono">{processError}</p>
+        </div>
+      )}
+
+      {processResult && (
+        <div className="mt-3 space-y-2">
+          <div className={`text-xs rounded-lg px-3 py-2 border ${processResult.created > 0 ? 'bg-green-500/10 border-green-500/20 text-green-700 dark:text-green-400' : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-700 dark:text-yellow-400'}`}>
+            {processResult.created > 0
+              ? <>✓ <strong>{processResult.created}</strong> listings created and claim emails queued</>
+              : '⚠ 0 listings created — see errors below'
+            }
+            {processResult.skipped > 0 && <> · <strong>{processResult.skipped}</strong> skipped (email already on file)</>}
+          </div>
+          {processResult.rowErrors.length > 0 && (
+            <div className="text-xs rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-red-700 dark:text-red-400">
+              <p className="font-semibold mb-1">Listing creation errors:</p>
+              <ul className="space-y-0.5 list-disc pl-4 font-mono">
+                {processResult.rowErrors.map((e, i) => <li key={i}>{e}</li>)}
+              </ul>
+            </div>
+          )}
+          {processResult.emailErrors.length > 0 && (
+            <div className="text-xs rounded-lg bg-yellow-500/10 border border-yellow-500/20 px-3 py-2 text-yellow-700 dark:text-yellow-400">
+              <p className="font-semibold mb-1">Email delivery errors (listings still created):</p>
+              <ul className="space-y-0.5 list-disc pl-4 font-mono">
+                {processResult.emailErrors.map((e, i) => <li key={i}>{e}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
 
       <RejectDialog row={row} open={rejectOpen} onOpenChange={setRejectOpen} />
     </li>
@@ -307,14 +372,19 @@ function UploadDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v:
           <DialogTitle>Upload member roster CSV</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          <div className="text-xs text-muted-foreground space-y-1">
-            <p>
-              <strong className="text-foreground">Required columns:</strong> {REQUIRED_HEADERS.join(', ')}
-            </p>
-            <p>
-              <strong className="text-foreground">Optional columns:</strong> {OPTIONAL_HEADERS.join(', ')}
-            </p>
-            <p>Up to 2,000 rows per upload, 1 MB file size limit.</p>
+          {/* Column reference box */}
+          <div className="rounded-lg border border-border bg-muted/40 divide-y divide-border text-xs">
+            <div className="flex items-center gap-3 px-3 py-2">
+              <span className="w-16 shrink-0 font-medium text-foreground">Required</span>
+              <span className="font-mono text-primary">{REQUIRED_HEADERS.join(', ')}</span>
+            </div>
+            <div className="flex items-start gap-3 px-3 py-2">
+              <span className="w-16 shrink-0 font-medium text-foreground pt-px">Optional</span>
+              <span className="font-mono text-muted-foreground leading-relaxed">{OPTIONAL_HEADERS.join(', ')}</span>
+            </div>
+            <div className="px-3 py-2 text-muted-foreground">
+              Up to 2,000 rows · 1 MB file size limit
+            </div>
           </div>
 
           {!parsed ? (
@@ -322,26 +392,27 @@ function UploadDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v:
               type="button"
               onClick={() => fileRef.current?.click()}
               disabled={isPending}
-              className="w-full border-2 border-dashed border-border rounded-lg p-8 hover:border-primary hover:bg-muted/30 transition-colors disabled:opacity-50"
+              className="w-full border-2 border-dashed border-border rounded-lg p-10 hover:border-primary hover:bg-primary/5 transition-colors disabled:opacity-50 group"
             >
-              <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                <Upload className="h-6 w-6" />
+              <div className="flex flex-col items-center gap-2 text-muted-foreground group-hover:text-primary transition-colors">
+                <Upload className="h-7 w-7" />
                 <p className="text-sm font-medium">Click to choose a CSV file</p>
               </div>
             </button>
           ) : (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">Preview · {parsed.rows.length} valid rows</p>
-                <Button
-                  size="sm"
-                  variant="outline"
+                <p className="text-sm font-semibold">{parsed.rows.length} valid rows ready</p>
+                <button
+                  type="button"
                   onClick={() => { setParsed(null); if (fileRef.current) fileRef.current.value = '' }}
                   disabled={isPending}
+                  className="text-xs text-primary hover:underline disabled:opacity-50"
                 >
                   Choose different file
-                </Button>
+                </button>
               </div>
+
               {parsed.warnings.length > 0 && (
                 <Alert>
                   <AlertDescription>
@@ -353,23 +424,30 @@ function UploadDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v:
                   </AlertDescription>
                 </Alert>
               )}
-              <div className="rounded-lg border border-border overflow-hidden max-h-72 overflow-y-auto">
-                <table className="w-full text-xs">
-                  <thead className="sticky top-0 bg-muted/50">
+
+              <div className="rounded-lg border border-border overflow-hidden max-h-60 overflow-y-auto">
+                <table className="w-full text-xs table-fixed">
+                  <colgroup>
+                    <col className="w-[35%]" />
+                    <col className="w-[20%]" />
+                    <col className="w-[25%]" />
+                    <col className="w-[20%]" />
+                  </colgroup>
+                  <thead className="sticky top-0 bg-muted border-b border-border">
                     <tr>
-                      <th className="text-left p-2 font-medium">Email</th>
-                      <th className="text-left p-2 font-medium">Name</th>
-                      <th className="text-left p-2 font-medium">Business</th>
-                      <th className="text-left p-2 font-medium">Location</th>
+                      <th className="text-left px-3 py-2.5 font-semibold text-muted-foreground tracking-wide uppercase text-[10px]">Email</th>
+                      <th className="text-left px-3 py-2.5 font-semibold text-muted-foreground tracking-wide uppercase text-[10px]">Name</th>
+                      <th className="text-left px-3 py-2.5 font-semibold text-muted-foreground tracking-wide uppercase text-[10px]">Business</th>
+                      <th className="text-left px-3 py-2.5 font-semibold text-muted-foreground tracking-wide uppercase text-[10px]">Location</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="divide-y divide-border">
                     {parsed.rows.slice(0, 50).map((r, i) => (
-                      <tr key={i} className="border-t border-border">
-                        <td className="p-2 text-muted-foreground">{r.email}</td>
-                        <td className="p-2">{r.full_name}</td>
-                        <td className="p-2 text-muted-foreground">{r.business_name || '—'}</td>
-                        <td className="p-2 text-muted-foreground">
+                      <tr key={i} className="hover:bg-muted/40 transition-colors">
+                        <td className="px-3 py-2.5 text-muted-foreground truncate" title={r.email}>{r.email}</td>
+                        <td className="px-3 py-2.5 font-medium truncate">{r.full_name}</td>
+                        <td className="px-3 py-2.5 text-muted-foreground truncate">{r.business_name || '—'}</td>
+                        <td className="px-3 py-2.5 text-muted-foreground truncate">
                           {[r.city, r.country].filter(Boolean).join(', ') || '—'}
                         </td>
                       </tr>
@@ -377,8 +455,8 @@ function UploadDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v:
                   </tbody>
                 </table>
                 {parsed.rows.length > 50 && (
-                  <p className="text-[11px] text-muted-foreground text-center py-2 border-t border-border">
-                    Showing first 50 of {parsed.rows.length}
+                  <p className="text-[11px] text-muted-foreground text-center py-2 border-t border-border bg-muted/30">
+                    Showing first 50 of {parsed.rows.length} rows
                   </p>
                 )}
               </div>

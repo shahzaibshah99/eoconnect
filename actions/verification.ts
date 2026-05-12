@@ -8,6 +8,7 @@ import { sendEmail, verificationSubmittedEmail, verificationPendingAdminEmail } 
 import { siteUrl } from '@/lib/site-url'
 import { currentTenant, type TenantId } from '@/lib/tenant'
 import { scrapeProfileForMembership } from '@/lib/linkedin-verification-scrape'
+import { notifyMember } from '@/lib/verification-gate'
 
 /**
  * Member-side verification submission.
@@ -140,8 +141,8 @@ export async function submitVerification(formData: FormData): Promise<{ error: s
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: admins } = await (svc as any)
         .from('profiles')
-        .select('eo_membership_email, full_name')
-        .eq('role', 'super_admin') as { data: Array<{ eo_membership_email: string | null; full_name: string | null }> | null }
+        .select('id, eo_membership_email, full_name')
+        .eq('role', 'super_admin') as { data: Array<{ id: string; eo_membership_email: string | null; full_name: string | null }> | null }
 
       const adminTpl = verificationPendingAdminEmail({
         memberName,
@@ -151,14 +152,31 @@ export async function submitVerification(formData: FormData): Promise<{ error: s
         siteUrl: siteUrl(),
       })
       for (const admin of admins ?? []) {
-        if (!admin.eo_membership_email) continue
-        sendEmail({
-          to: admin.eo_membership_email,
-          subject: adminTpl.subject,
-          html: adminTpl.html,
-        }).catch(err => {
-          console.error('[verification] admin notification email failed for', admin.eo_membership_email, err)
-        })
+        // Email notification
+        if (admin.eo_membership_email) {
+          sendEmail({
+            to: admin.eo_membership_email,
+            subject: adminTpl.subject,
+            html: adminTpl.html,
+          }).catch(err => {
+            console.error('[verification] admin notification email failed for', admin.eo_membership_email, err)
+          })
+        }
+        // In-app bell notification — shows up immediately in the admin's
+        // navbar bell with a link straight to the verification queue.
+        if (admin.id) {
+          notifyMember({
+            userId: admin.id,
+            type: 'verification_pending',
+            title: `New verification from ${memberName}`,
+            body: profile?.eo_chapter
+              ? `${memberName} · ${profile.eo_chapter}`
+              : memberName,
+            link: '/admin/verifications',
+          }).catch(err => {
+            console.error('[verification] admin in-app notify failed for', admin.id, err)
+          })
+        }
       }
     }
   } catch (err) {

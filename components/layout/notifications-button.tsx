@@ -248,6 +248,9 @@ export function NotificationsButton({ unread, recent, ownedBusinessIds }: Notifi
  * neutral icon, and the next dev can add specific styling later.
  */
 function SystemNotifIcon({ type }: { type: string }) {
+  if (type === 'verification_pending') {
+    return <ShieldAlert className="h-3.5 w-3.5 text-primary shrink-0" />
+  }
   if (type === 'verification_approved') {
     return <ShieldCheck className="h-3.5 w-3.5 text-green-600 shrink-0" />
   }

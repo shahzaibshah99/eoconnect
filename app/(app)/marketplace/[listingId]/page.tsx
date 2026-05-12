@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { MapPin, Globe, Phone, Mail, Star, Calendar, Users, FileText, ExternalLink } from 'lucide-react'
+import { MapPin, Globe, Phone, Mail, Star, Calendar, Users, FileText, ExternalLink, Handshake } from 'lucide-react'
 
 // Inline brand SVGs — Lucide 1.x dropped brand icons into a separate package.
 const LinkedinIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -30,6 +30,8 @@ const FacebookIcon = (props: React.SVGProps<SVGSVGElement>) => (
 )
 import { InquiryDialog } from '@/components/marketplace/inquiry-dialog'
 import { FlagDialog } from '@/components/marketplace/flag-dialog'
+import { EndorsementForm } from '@/components/marketplace/endorsement-form'
+import { EndorsementDisplay } from '@/components/marketplace/endorsement-display'
 import { externalUrl } from '@/lib/external-url'
 import { ReviewForm } from '@/components/reviews/review-form'
 import { ReviewCard, type ReviewCardItem } from '@/components/reviews/review-card'
@@ -57,7 +59,7 @@ export default async function ListingDetailPage({ params }: ListingDetailProps) 
   // membership) AND a join to their reviewer_business + the
   // service_id of the review's specific service. The card renders
   // the reviewer's BUSINESS as the primary identity when available.
-  const [{ data: business }, { data: services }, { data: reviews }, { data: categories }] = await Promise.all([
+  const [{ data: business }, { data: services }, { data: reviews }, { data: categories }, { data: endorsements }] = await Promise.all([
     db.from('businesses').select('*, profiles!owner_id(full_name, avatar_url, eo_chapter, eo_membership_type, linkedin_url)').eq('id', listingId).eq('status', 'published').single(),
     db.from('services').select('*').eq('business_id', listingId).eq('status', 'published'),
     db.from('reviews')
@@ -71,6 +73,10 @@ export default async function ListingDetailPage({ params }: ListingDetailProps) 
       .eq('flagged', false)
       .order('created_at', { ascending: false }),
     supabase.from('categories').select('id, name').eq('active', true),
+    db.from('endorsements')
+      .select('id, from_member_id, text, created_at, profiles!from_member_id(full_name, avatar_url, eo_chapter, eo_membership_type)')
+      .eq('business_id', listingId)
+      .order('created_at', { ascending: false }),
   ])
 
   if (!business) notFound()
@@ -534,6 +540,29 @@ export default async function ListingDetailPage({ params }: ListingDetailProps) 
           </div>
         ) : (
           <p className="text-muted-foreground text-sm">No reviews yet.</p>
+        )}
+      </section>
+
+      {/* I've Worked With Endorsements */}
+      <section>
+        <div className="flex items-center gap-2 mb-4">
+          <Handshake className="h-5 w-5" />
+          <h2 className="text-xl font-bold">I&apos;ve Worked With</h2>
+        </div>
+
+        {!isOwner && user && (
+          <div className="mb-6">
+            <EndorsementForm businessId={business.id} />
+          </div>
+        )}
+
+        {endorsements && endorsements.length > 0 ? (
+          <EndorsementDisplay
+            endorsements={endorsements as import('@/components/marketplace/endorsement-display').EndorsementItem[]}
+            businessName={business.name}
+          />
+        ) : (
+          <p className="text-muted-foreground text-sm">No endorsements yet. Be the first to share your experience working with this business!</p>
         )}
       </section>
     </div>

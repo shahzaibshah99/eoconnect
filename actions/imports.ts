@@ -130,19 +130,20 @@ const NoteSchema = z.object({
   note: z.string().trim().min(3).max(500),
 })
 
-export async function approveCsvImport(id: string): Promise<{ error: string | null }> {
+export async function approveCsvImport(id: string): Promise<{ error: string | null; created?: number; skipped?: number; rowErrors?: string[]; emailErrors?: string[] }> {
   const ctx = await requireAdmin()
   if (ctx.error) return { error: ctx.error }
 
   const svc = adminDb()
   const { data: row } = await svc
     .from('csv_imports')
-    .select('id, status, source, row_count')
+    .select('id, status, source, row_count, payload')
     .eq('id', id)
-    .maybeSingle() as { data: { id: string; status: string; source: string; row_count: number } | null }
+    .maybeSingle() as { data: { id: string; status: string; source: string; row_count: number; payload: { rows: CsvRow[] } } | null }
   if (!row) return { error: 'Import not found' }
   if (row.status !== 'pending') return { error: `Cannot approve from status '${row.status}'` }
 
+  // Mark approved first so the UI reflects the decision immediately.
   const { error } = await svc
     .from('csv_imports')
     .update({
@@ -159,8 +160,22 @@ export async function approveCsvImport(id: string): Promise<{ error: string | nu
     row_count: row.row_count,
   })
 
+  // Auto-process immediately — create listings and send claim emails.
+  const processRes = await markCsvImportProcessed(id)
+  if (processRes.error) {
+    console.error('[csv-import] auto-process after approval failed:', processRes.error)
+    // Return the error so the UI can show it. Approval is still recorded.
+    return { error: processRes.error }
+  }
+
   revalidatePath('/admin/imports')
-  return { error: null }
+  return {
+    error: null,
+    created: processRes.created,
+    skipped: processRes.skipped,
+    rowErrors: processRes.rowErrors,
+    emailErrors: processRes.emailErrors,
+  }
 }
 
 export async function rejectCsvImport(id: string, note: string): Promise<{ error: string | null }> {
@@ -224,27 +239,44 @@ interface CsvRow {
   country?: string
 }
 
-export async function markCsvImportProcessed(id: string): Promise<{ error: string | null; created?: number; skipped?: number }> {
+export async function markCsvImportProcessed(id: string): Promise<{
+  error: string | null
+  created?: number
+  skipped?: number
+  rowErrors?: string[]
+  emailErrors?: string[]
+}> {
   const ctx = await requireAdmin()
   if (ctx.error) return { error: ctx.error }
 
+  // Verify critical env vars before touching anything
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return { error: 'SUPABASE_SERVICE_ROLE_KEY is not set — cannot create listings' }
+  }
+
   const svc = adminDb()
-  const { data: row } = await svc
+  const { data: row, error: fetchErr } = await svc
     .from('csv_imports')
     .select('id, status, row_count, payload')
     .eq('id', id)
-    .maybeSingle() as { data: { id: string; status: string; row_count: number; payload: { rows: CsvRow[] } } | null }
+    .maybeSingle() as { data: { id: string; status: string; row_count: number; payload: { rows: CsvRow[] } } | null; error: { message: string } | null }
+
+  if (fetchErr) return { error: `DB read failed: ${fetchErr.message}` }
   if (!row) return { error: 'Import not found' }
-  if (row.status !== 'approved') return { error: 'Only approved imports can be marked processed' }
+  if (row.status !== 'approved') return { error: `Cannot process — current status is '${row.status}' (must be 'approved')` }
 
   const rows = row.payload?.rows ?? []
+  if (rows.length === 0) {
+    return { error: 'No rows found in import payload — the CSV data may not have saved correctly' }
+  }
+
   let created = 0
   let skipped = 0
+  const rowErrors: string[] = []
+  const emailErrors: string[] = []
 
   for (const r of rows) {
-    // Skip rows where this email is already on file as a claimed
-    // (real-owner) listing. Multiple pre-populated rows on the same
-    // email are also skipped — first one wins, the rest are noise.
+    // Skip if this email already has a listing
     const { data: existing } = await svc
       .from('businesses')
       .select('id')
@@ -265,33 +297,36 @@ export async function markCsvImportProcessed(id: string): Promise<{ error: strin
       description: '',
     })
     if (createRes.error || !createRes.business_id) {
-      console.error('[csv-processor] create failed for', r.email, createRes.error)
+      const msg = `${r.email}: ${createRes.error ?? 'unknown error'}`
+      console.error('[csv-processor] create failed:', msg)
+      rowErrors.push(msg)
       skipped++
       continue
     }
     created++
 
-    // Fire the initial claim email. Best-effort — one bad address can't
-    // halt the whole batch.
     const sendRes = await _sendClaimEmail(svc, createRes.business_id)
     if (sendRes.error) {
-      console.error('[csv-processor] claim email failed for', r.email, sendRes.error)
+      const msg = `${r.email}: ${sendRes.error}`
+      console.error('[csv-processor] email failed:', msg)
+      emailErrors.push(msg)
     }
   }
 
-  const { error } = await svc
+  await svc
     .from('csv_imports')
     .update({ status: 'processed', processed_at: new Date().toISOString() })
     .eq('id', id)
-  if (error) return { error: error.message }
 
   await logEvent(svc, 'csv_import_processed', ctx.user!.id, id, {
     row_count: row.row_count,
     created,
     skipped,
+    row_errors: rowErrors,
+    email_errors: emailErrors,
   })
 
   revalidatePath('/admin/imports')
   revalidatePath('/marketplace')
-  return { error: null, created, skipped }
+  return { error: null, created, skipped, rowErrors, emailErrors }
 }

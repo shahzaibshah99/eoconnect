@@ -24,6 +24,7 @@ type SearchParams = {
   tag?: string          // verification_tag — 'eo_member' | 'eo_alumni' | etc.
   team_size?: string    // businesses.team_size — '1-10' | '11-50' | etc.
   item_type?: string    // 'service' | 'product' — filter to businesses that have at least one
+  revenue_range?: string // businesses.revenue_range — e.g. 'under-1m' | '1m-10m' | etc.
 }
 
 // ── Member Market ranking ─────────────────────────────────────
@@ -125,6 +126,7 @@ async function SearchResults({ searchParams }: SearchPageProps) {
   const teamSizeFilter = params.team_size?.trim() || null   // team_size exact match
   const itemTypeFilter = (params.item_type === 'service' || params.item_type === 'product')
     ? params.item_type : null
+  const revenueRangeFilter = params.revenue_range?.trim() || null
 
   // If item_type filter is active, pre-fetch business IDs that have at
   // least one service/product of that type. Null = no filter.
@@ -184,6 +186,7 @@ async function SearchResults({ searchParams }: SearchPageProps) {
     // F09 new filters
     if (tagFilter) q = q.eq('verification_tag', tagFilter)
     if (teamSizeFilter) q = q.eq('team_size', teamSizeFilter)
+    if (revenueRangeFilter) q = q.eq('revenue_range', revenueRangeFilter)
     if (itemTypeBusinessIds) q = q.in('id', itemTypeBusinessIds)
     return q
   }

@@ -16,6 +16,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { format, formatDistanceToNow } from 'date-fns'
 import { AlertTriangle, ShieldOff, Ban, CheckCircle2, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { MessageThreadDialog } from '@/components/admin/message-thread-dialog'
 
 type TargetType = 'listing' | 'post' | 'response' | 'review' | 'message'
 type FlagType = 'solicitation' | 'spam' | 'inaccurate' | 'inappropriate'
@@ -141,6 +142,7 @@ function FlagGroupItem({ group }: { group: FlagGroup }) {
   }
 
   const targetHref = group.target_type === 'listing' ? `/marketplace/${group.target_id}` : null
+  const isMessageFlag = group.target_type === 'message'
 
   return (
     <li className={cn('p-4 transition-colors', escalated ? 'bg-red-500/5' : 'hover:bg-muted/20')}>
@@ -192,6 +194,12 @@ function FlagGroupItem({ group }: { group: FlagGroup }) {
               >
                 Open target <ExternalLink className="h-3 w-3" />
               </Link>
+            )}
+            {isMessageFlag && (
+              <MessageThreadDialog
+                messageId={group.target_id}
+                targetName={group.target_name}
+              />
             )}
           </div>
           {expanded && (

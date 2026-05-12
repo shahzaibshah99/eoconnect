@@ -16,9 +16,9 @@ export default async function GetStartedPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [{ data: profile }, { data: verification }, { data: businesses }] = await Promise.all([
-    db.from('profiles').select('full_name, verification_tag').eq('id', user.id).maybeSingle() as Promise<{
-      data: { full_name: string | null; verification_tag: string } | null
+  const [{ data: profile }, { data: verification }, { data: businesses }, { data: pendingClaim }] = await Promise.all([
+    db.from('profiles').select('full_name, verification_tag, eo_membership_email').eq('id', user.id).maybeSingle() as Promise<{
+      data: { full_name: string | null; verification_tag: string; eo_membership_email: string | null } | null
     }>,
     db.from('verifications').select('status, created_at').eq('member_id', user.id)
       .order('created_at', { ascending: false }).limit(1).maybeSingle() as Promise<{
@@ -27,10 +27,22 @@ export default async function GetStartedPage() {
     db.from('businesses').select('id').eq('owner_id', user.id).limit(1) as Promise<{
       data: Array<{ id: string }> | null
     }>,
+    // Check if there is a pre-populated listing waiting to be claimed
+    // for this member's email — surface the claim link if so.
+    db.from('businesses').select('id, name, claim_token')
+      .eq('is_pre_populated', true)
+      .is('owner_id', null)
+      .ilike('email', user.email ?? '')
+      .not('claim_token', 'is', null)
+      .limit(1)
+      .maybeSingle() as Promise<{
+      data: { id: string; name: string; claim_token: string } | null
+    }>,
   ])
 
   const isVerified = profile?.verification_tag && profile.verification_tag !== 'unverified'
   const hasBusiness = (businesses ?? []).length > 0
+  const hasPendingClaim = !!pendingClaim
   const verificationPending = verification?.status === 'pending'
 
   // If they've already done both steps, send them to the dashboard.
@@ -47,6 +59,25 @@ export default async function GetStartedPage() {
           Two quick steps to get your business listed on Member Market.
         </p>
       </div>
+
+      {/* Pending claim banner — shown when a pre-populated listing is
+          waiting for this user's email to be claimed. */}
+      {hasPendingClaim && pendingClaim && (
+        <div className="rounded-2xl border-2 border-primary bg-primary/5 p-5 flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold">Your listing is waiting to be claimed</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              <strong>{pendingClaim.name}</strong> was pre-created for you. Claim it to take ownership — no need to create a new listing.
+            </p>
+          </div>
+          <Link
+            href={`/claim/${pendingClaim.claim_token}`}
+            className={cn(buttonVariants(), 'shrink-0 gap-2')}
+          >
+            Claim your listing →
+          </Link>
+        </div>
+      )}
 
       {/* Step 1 — Verify */}
       <div className={cn(

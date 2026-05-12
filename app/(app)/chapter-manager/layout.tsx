@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { Users, Upload, LayoutDashboard, BadgeCheck } from 'lucide-react'
+import { Users, Upload, LayoutDashboard, BadgeCheck, Star, ArrowRightLeft } from 'lucide-react'
 
 export const dynamic = 'force-dynamic'
 
@@ -95,6 +95,18 @@ function ChapterSection({ id, name }: { id: number; name: string }) {
         className="flex items-center gap-2 px-5 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted"
       >
         <Upload className="h-3.5 w-3.5" /> CSV import
+      </Link>
+      <Link
+        href={`/chapter-manager/${id}/sponsors`}
+        className="flex items-center gap-2 px-5 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted"
+      >
+        <Star className="h-3.5 w-3.5" /> Sponsors
+      </Link>
+      <Link
+        href={`/chapter-manager/${id}/transfer`}
+        className="flex items-center gap-2 px-5 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted"
+      >
+        <ArrowRightLeft className="h-3.5 w-3.5" /> Transfer listings
       </Link>
     </div>
   )

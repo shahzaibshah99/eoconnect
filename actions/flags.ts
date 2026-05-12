@@ -230,3 +230,81 @@ export async function disposeFlagsAgainstMember(
   revalidatePath('/admin/members')
   return { error: null }
 }
+
+// ── Admin-side: read-only message thread for flag review ──────
+//
+// Per scope F15: "Read-only message thread viewer — accessible only
+// when reviewing a flag. Not a general monitoring dashboard."
+//
+// Takes the flagged message_id, finds its conversation, and returns
+// all messages in that conversation so the admin can read context.
+
+export type AdminThreadMessage = {
+  id: string
+  body: string | null
+  sender_name: string | null
+  sender_id: string
+  created_at: string
+  attachment_name: string | null
+  is_flagged_message: boolean
+}
+
+export async function getMessageThread(
+  messageId: string
+): Promise<{ error: string | null; messages?: AdminThreadMessage[]; business_name?: string | null }> {
+  const ctx = await requireAdmin()
+  if (ctx.error) return { error: ctx.error }
+
+  const svc = adminDb()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = svc as any
+
+  // Find the conversation containing this message.
+  const { data: msg } = await db
+    .from('messages')
+    .select('id, conversation_id')
+    .eq('id', messageId)
+    .maybeSingle() as { data: { id: string; conversation_id: string } | null }
+
+  if (!msg) return { error: 'Message not found' }
+
+  // Get all messages in the same conversation with sender names.
+  const { data: messages, error } = await db
+    .from('messages')
+    .select('id, body, sender_id, created_at, attachment_name, profiles!sender_id(full_name)')
+    .eq('conversation_id', msg.conversation_id)
+    .order('created_at', { ascending: true }) as {
+    data: Array<{
+      id: string
+      body: string | null
+      sender_id: string
+      created_at: string
+      attachment_name: string | null
+      profiles?: { full_name?: string | null } | null
+    }> | null
+    error: { message: string } | null
+  }
+
+  if (error) return { error: error.message }
+
+  // Get business name from conversation for context.
+  const { data: conv } = await db
+    .from('conversations')
+    .select('listing_id, businesses!listing_id(name)')
+    .eq('id', msg.conversation_id)
+    .maybeSingle() as { data: { listing_id: string | null; businesses?: { name: string } | null } | null }
+
+  return {
+    error: null,
+    business_name: conv?.businesses?.name ?? null,
+    messages: (messages ?? []).map(m => ({
+      id: m.id,
+      body: m.body,
+      sender_name: m.profiles?.full_name ?? null,
+      sender_id: m.sender_id,
+      created_at: m.created_at,
+      attachment_name: m.attachment_name,
+      is_flagged_message: m.id === messageId,
+    })),
+  }
+}

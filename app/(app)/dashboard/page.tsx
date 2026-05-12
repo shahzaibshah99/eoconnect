@@ -12,6 +12,22 @@ import { LeadProgress } from '@/components/dashboard/lead-progress'
 import { DashboardViewToggle } from '@/components/dashboard/dashboard-view-toggle'
 import { CustomerView } from '@/components/dashboard/customer-view'
 import { BusinessSwitcher } from '@/components/dashboard/business-switcher'
+import { NeedsLeadsFeed } from '@/components/dashboard/needs-leads-feed'
+import { QuickPostDialog } from '@/components/dashboard/quick-post-dialog'
+
+export type NeedsPost = {
+  id: string
+  title: string
+  category: string
+  tags: string[]
+  geography_country: string | null
+  geography_city: string | null
+  required_by: string
+  status: 'open' | 'fulfilled' | 'expired' | 'archived'
+  response_count: number
+  created_at: string
+  board_type: 'business' | 'community'
+}
 
 interface DashboardPageProps {
   searchParams: Promise<{ business?: string }>
@@ -38,10 +54,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   // Fetch ALL the user's businesses for the switcher dropdown.
   const { data: ownedBusinesses } = await db
     .from('businesses')
-    .select('id, name, status')
+    .select('id, name, status, country, created_at, slow_replier')
     .eq('owner_id', user.id)
     .order('created_at', { ascending: false }) as {
-      data: Array<{ id: string; name: string; status: string }> | null
+      data: Array<{ id: string; name: string; status: string; country: string | null; created_at: string | null; slow_replier: boolean }> | null
     }
   const allBusinesses = ownedBusinesses ?? []
   // Pick the business named in ?business=<id> if it belongs to this user,
@@ -122,6 +138,43 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const thirtyDaysAgo = new Date()
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
+  // Needs & Leads feed — open posts geo-matched to the member's business country.
+  // We fetch both board types in a single query and split client-side.
+  // Falls back to showing all open posts when the business has no country set.
+  const needsQuery = db
+    .from('bulletin_posts')
+    .select('id, title, category, tags, geography_country, geography_city, required_by, status, response_count, created_at, board_type')
+    .eq('status', 'open')
+    .eq('tenant_id', 'eo')
+    .order('created_at', { ascending: false })
+    .limit(20)
+
+  const { data: needsPosts } = business?.country
+    ? await needsQuery.eq('geography_country', business.country)
+    : await needsQuery
+
+  const businessNeeds = ((needsPosts ?? []) as NeedsPost[]).filter(p => p.board_type === 'business').slice(0, 5)
+  const communityAsks = ((needsPosts ?? []) as NeedsPost[]).filter(p => p.board_type === 'community').slice(0, 5)
+
+  // My Posts — member's own bulletin posts (both board types), most recent first
+  const { data: myPosts } = await db
+    .from('bulletin_posts')
+    .select('id, title, status, board_type, response_count, required_by, created_at')
+    .eq('member_id', user.id)
+    .eq('tenant_id', 'eo')
+    .order('created_at', { ascending: false })
+    .limit(5) as {
+    data: Array<{
+      id: string
+      title: string
+      status: 'open' | 'fulfilled' | 'expired' | 'archived'
+      board_type: 'business' | 'community'
+      response_count: number
+      required_by: string
+      created_at: string
+    }> | null
+  }
+
   const { data: analytics } = await db
     .from('listing_analytics')
     .select('date, views, search_appearances, contact_clicks')
@@ -154,7 +207,21 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           )}
           <p className="text-muted-foreground text-sm mt-0.5">Business Dashboard</p>
         </div>
-        <Badge variant="secondary" className="capitalize ml-auto">{business.status}</Badge>
+        <div className="flex items-center gap-2 ml-auto">
+          {/* Freshness indicator — green (<60d), amber (60-89d), grey+label (90d+/slow replier) */}
+          {(() => {
+            if (business.slow_replier) {
+              return <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><span className="h-2 w-2 rounded-full bg-muted-foreground/40 shrink-0" />Slow replier</span>
+            }
+            const daysSinceCreated = Math.floor((Date.now() - new Date(business.created_at ?? Date.now()).getTime()) / (24 * 60 * 60 * 1000))
+            if (daysSinceCreated >= 60) {
+              return <span className="flex items-center gap-1.5 text-xs text-yellow-600 dark:text-yellow-400"><span className="h-2 w-2 rounded-full bg-yellow-500 shrink-0" />Low activity</span>
+            }
+            return <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400"><span className="h-2 w-2 rounded-full bg-green-500 shrink-0" />Active</span>
+          })()}
+          <Badge variant="secondary" className="capitalize">{business.status}</Badge>
+        </div>
+        <QuickPostDialog />
       </div>
 
       {/* Profile / business management actions (MM-11, MM-12) */}
@@ -250,6 +317,48 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           </div>
         </section>
       )}
+
+      {/* My Posts — member's own bulletin board posts */}
+      {myPosts && myPosts.length > 0 && (
+        <section className="space-y-3 pt-4 border-t border-border">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">My Posts</h2>
+            <Link href="/bulletin" className="text-xs text-primary hover:underline">View all →</Link>
+          </div>
+          <div className="space-y-2">
+            {myPosts.map(p => {
+              const href = p.board_type === 'community' ? `/community/${p.id}` : `/bulletin/${p.id}`
+              const statusColor = p.status === 'fulfilled'
+                ? 'text-green-600 dark:text-green-400'
+                : p.status === 'open'
+                  ? 'text-primary'
+                  : 'text-muted-foreground'
+              return (
+                <Link key={p.id} href={href} className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted/50 transition-colors group">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate group-hover:text-primary transition-colors">{p.title}</p>
+                    <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground">
+                      <span className={`capitalize font-medium ${statusColor}`}>{p.status}</span>
+                      <span>·</span>
+                      <span>{p.board_type === 'community' ? 'Community Ask' : 'Business Need'}</span>
+                      {p.response_count > 0 && (
+                        <><span>·</span><span>{p.response_count} {p.response_count === 1 ? 'reply' : 'replies'}</span></>
+                      )}
+                    </div>
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Needs & Leads feed — open bulletin posts relevant to this member */}
+      <NeedsLeadsFeed
+        businessNeeds={businessNeeds}
+        communityAsks={communityAsks}
+        country={business.country ?? null}
+      />
 
       {/* Analytics — secondary, below the fold */}
       <section className="space-y-4 pt-4 border-t border-border">

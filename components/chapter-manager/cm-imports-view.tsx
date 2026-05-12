@@ -87,13 +87,27 @@ export function CmImportsView({
     <div className="space-y-6">
       {/* Upload card */}
       <div className="bg-card border border-border rounded-xl p-5 space-y-4">
-        <div>
+        <div className="space-y-2">
           <h2 className="font-semibold">Submit a new roster</h2>
-          <p className="text-xs text-muted-foreground mt-1">
-            <strong className="text-foreground">Required:</strong> {REQUIRED_HEADERS.join(', ')}{' · '}
-            <strong className="text-foreground">Optional:</strong> {OPTIONAL_HEADERS.join(', ')}{' · '}
-            Up to 2,000 rows · 1 MB file size limit
-          </p>
+          <div className="space-y-1">
+            <div className="flex items-start gap-2 text-xs">
+              <span className="font-semibold text-foreground shrink-0 mt-0.5">Required columns:</span>
+              <div className="flex flex-wrap gap-1">
+                {REQUIRED_HEADERS.map(h => (
+                  <span key={h} className="bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[11px] font-mono">{h}</span>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-start gap-2 text-xs">
+              <span className="font-semibold text-foreground shrink-0 mt-0.5">Optional columns:</span>
+              <div className="flex flex-wrap gap-1">
+                {OPTIONAL_HEADERS.map(h => (
+                  <span key={h} className="bg-muted text-muted-foreground px-1.5 py-0.5 rounded text-[11px] font-mono">{h}</span>
+                ))}
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground">Up to 2,000 rows per upload · 1 MB file size limit</p>
+          </div>
         </div>
 
         {!parsed ? (
@@ -110,17 +124,7 @@ export function CmImportsView({
           </button>
         ) : (
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium">Preview · {parsed.rows.length} valid rows</p>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => { setParsed(null); if (fileRef.current) fileRef.current.value = '' }}
-                disabled={isPending}
-              >
-                Choose different file
-              </Button>
-            </div>
+            <p className="text-sm font-medium">Preview · {parsed.rows.length} valid rows</p>
             {parsed.warnings.length > 0 && (
               <Alert>
                 <AlertDescription>
@@ -132,35 +136,50 @@ export function CmImportsView({
                 </AlertDescription>
               </Alert>
             )}
-            <div className="rounded-lg border border-border overflow-hidden max-h-72 overflow-y-auto">
+            <div className="rounded-lg border border-border overflow-hidden max-h-64 overflow-y-auto">
               <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-muted/50">
+                <thead className="sticky top-0 bg-muted border-b border-border">
                   <tr>
-                    <th className="text-left p-2 font-medium">Email</th>
-                    <th className="text-left p-2 font-medium">Name</th>
-                    <th className="text-left p-2 font-medium">Business</th>
+                    <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Email</th>
+                    <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Name</th>
+                    <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Business</th>
+                    <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Location</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-border">
                   {parsed.rows.slice(0, 50).map((r, i) => (
-                    <tr key={i} className="border-t border-border">
-                      <td className="p-2 text-muted-foreground">{r.email}</td>
-                      <td className="p-2">{r.full_name}</td>
-                      <td className="p-2 text-muted-foreground">{r.business_name || '—'}</td>
+                    <tr key={i} className="hover:bg-muted/30 transition-colors">
+                      <td className="px-3 py-2 text-muted-foreground max-w-45 truncate">{r.email}</td>
+                      <td className="px-3 py-2 font-medium">{r.full_name}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{r.business_name || <span className="text-border">—</span>}</td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {[r.city, r.country].filter(Boolean).join(', ') || <span className="text-border">—</span>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               {parsed.rows.length > 50 && (
-                <p className="text-[11px] text-muted-foreground text-center py-2 border-t border-border">
-                  Showing first 50 of {parsed.rows.length}
+                <p className="text-[11px] text-muted-foreground text-center py-2 border-t border-border bg-muted/20">
+                  Showing first 50 of {parsed.rows.length} rows
                 </p>
               )}
             </div>
-            <Button onClick={submit} disabled={isPending} className="gap-1.5">
-              <FileSpreadsheet className="h-4 w-4" />
-              {isPending ? 'Submitting…' : `Submit ${parsed.rows.length} rows for review`}
-            </Button>
+
+            <div className="flex items-center gap-3 pt-1">
+              <Button onClick={submit} disabled={isPending} className="gap-1.5 flex-1">
+                <FileSpreadsheet className="h-4 w-4" />
+                {isPending ? 'Submitting…' : `Submit ${parsed.rows.length} rows for review`}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => { setParsed(null); if (fileRef.current) fileRef.current.value = '' }}
+                disabled={isPending}
+              >
+                Cancel
+              </Button>
+            </div>
           </div>
         )}
 

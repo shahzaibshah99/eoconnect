@@ -248,6 +248,18 @@ export async function completeClaim(token: string): Promise<{ error: string | nu
 
   if (error) return { error: error.message }
 
+  // Stamp onboarded_at on the claimer's profile so the proxy's
+  // onboarding/business gate never fires for them. Without this, new
+  // users who claim a listing before completing the normal onboarding
+  // wizard get indefinitely bounced between /onboarding and /get-started
+  // because onboarded_at is only set by the business wizard otherwise.
+  // Best-effort — a failure here is not fatal; the claim still succeeds.
+  await svc
+    .from('profiles')
+    .update({ onboarded_at: new Date().toISOString() })
+    .eq('id', user.id)
+    .is('onboarded_at', null)
+
   // Audit. Best-effort but loud — same pattern as actions/admin.ts.
   const { error: logErr } = await svc.from('events_log').insert({
     type: 'business_claimed',
