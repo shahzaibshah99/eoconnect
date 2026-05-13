@@ -6,6 +6,9 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { currentTenant } from '@/lib/tenant'
 import { _createPrePopulatedListing, _sendClaimEmail } from '@/actions/claim'
+import { scrapeWebsiteBasics } from '@/lib/scrape-website'
+import { scrapeLinkedInCompany } from '@/lib/linkedin-company-scrape'
+import { generateBusinessTags } from '@/lib/ai/generate-business-tags'
 
 function adminDb() {
   return createServiceClient(
@@ -235,6 +238,7 @@ interface CsvRow {
   full_name: string
   business_name?: string
   business_url?: string
+  linkedin_url?: string
   city?: string
   country?: string
 }
@@ -287,14 +291,43 @@ export async function markCsvImportProcessed(id: string): Promise<{
       continue
     }
 
+    // Step 1: Scrape website for name, description, logo, cover
+    const webScraped = r.business_url?.trim()
+      ? await scrapeWebsiteBasics(r.business_url.trim())
+      : null
+
+    // Step 2: Scrape LinkedIn company page for founded year,
+    // employee count, industry, specialties
+    const linkedIn = r.linkedin_url?.trim()
+      ? await scrapeLinkedInCompany(r.linkedin_url.trim())
+      : null
+
+    // Step 3: AI generates tags + polished description from all data
+    const businessName = r.business_name?.trim() || webScraped?.name || linkedIn?.name || r.full_name
+    const rawDesc = linkedIn?.description || webScraped?.description || null
+    const aiData = await generateBusinessTags({
+      name: businessName,
+      rawDescription: rawDesc,
+      industry: linkedIn?.industry || null,
+      specialties: linkedIn?.specialties ?? [],
+      website: r.business_url?.trim() || null,
+    })
+
     const createRes = await _createPrePopulatedListing(svc, {
-      name: r.business_name?.trim() || r.full_name,
+      name: businessName,
       email: r.email,
       full_name: r.full_name,
-      website: r.business_url || '',
+      tagline: webScraped?.tagline || (rawDesc ? rawDesc.slice(0, 110) : ''),
+      description: aiData?.description || rawDesc || '',
+      website: r.business_url?.trim() || '',
+      logo_url: linkedIn?.logo_url || webScraped?.logo_url || '',
+      cover_url: linkedIn?.cover_url || webScraped?.cover_url || '',
+      phone: webScraped?.phone || '',
+      founded_year: linkedIn?.founded_year ?? webScraped?.founded_year ?? null,
+      team_size: linkedIn?.employee_count || '',
+      tags: aiData?.tags ?? [],
       city: r.city || '',
       country: r.country || '',
-      description: '',
     })
     if (createRes.error || !createRes.business_id) {
       const msg = `${r.email}: ${createRes.error ?? 'unknown error'}`

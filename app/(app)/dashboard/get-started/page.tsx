@@ -16,7 +16,7 @@ export default async function GetStartedPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [{ data: profile }, { data: verification }, { data: businesses }, { data: pendingClaim }] = await Promise.all([
+  const [{ data: profile }, { data: verification }, { data: businesses }] = await Promise.all([
     db.from('profiles').select('full_name, verification_tag, eo_membership_email').eq('id', user.id).maybeSingle() as Promise<{
       data: { full_name: string | null; verification_tag: string; eo_membership_email: string | null } | null
     }>,
@@ -27,22 +27,23 @@ export default async function GetStartedPage() {
     db.from('businesses').select('id').eq('owner_id', user.id).limit(1) as Promise<{
       data: Array<{ id: string }> | null
     }>,
-    // Check if there is a pre-populated listing waiting to be claimed
-    // for this member's email — surface the claim link if so.
-    db.from('businesses').select('id, name, claim_token')
-      .eq('is_pre_populated', true)
-      .is('owner_id', null)
-      .ilike('email', user.email ?? '')
-      .not('claim_token', 'is', null)
-      .limit(1)
-      .maybeSingle() as Promise<{
-      data: { id: string; name: string; claim_token: string } | null
-    }>,
   ])
+
+  // Separate query for pending claim — inline cast to known shape
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pendingClaimRaw: any = await db.from('businesses').select('id, name, claim_token')
+    .eq('is_pre_populated', true)
+    .is('owner_id', null)
+    .ilike('email', user.email ?? '')
+    .not('claim_token', 'is', null)
+    .limit(1)
+    .maybeSingle()
+  const pendingClaimName: string | null = pendingClaimRaw?.data?.name ?? null
+  const pendingClaimToken: string | null = pendingClaimRaw?.data?.claim_token ?? null
 
   const isVerified = profile?.verification_tag && profile.verification_tag !== 'unverified'
   const hasBusiness = (businesses ?? []).length > 0
-  const hasPendingClaim = !!pendingClaim
+  const hasPendingClaim = !!pendingClaimToken
   const verificationPending = verification?.status === 'pending'
 
   // If they've already done both steps, send them to the dashboard.
@@ -50,7 +51,7 @@ export default async function GetStartedPage() {
 
   // If there's a pre-populated listing waiting for their email,
   // send them straight to the claim page — skip the two-step flow entirely.
-  if (hasPendingClaim && pendingClaim) redirect(`/claim/${pendingClaim.claim_token}`)
+  if (hasPendingClaim && pendingClaimToken) redirect(`/claim/${pendingClaimToken}`)
 
   const name = profile?.full_name?.split(' ')[0] ?? 'there'
 
@@ -66,16 +67,16 @@ export default async function GetStartedPage() {
 
       {/* Pending claim banner — shown when a pre-populated listing is
           waiting for this user's email to be claimed. */}
-      {hasPendingClaim && pendingClaim && (
+      {hasPendingClaim && pendingClaimToken && (
         <div className="rounded-2xl border-2 border-primary bg-primary/5 p-5 flex flex-col sm:flex-row sm:items-center gap-4">
           <div className="flex-1 min-w-0">
             <p className="font-semibold">Your listing is waiting to be claimed</p>
             <p className="text-sm text-muted-foreground mt-1">
-              <strong>{pendingClaim.name}</strong> was pre-created for you. Claim it to take ownership — no need to create a new listing.
+              {pendingClaimName && <strong>{pendingClaimName}</strong>} was pre-created for you. Claim it to take ownership — no need to create a new listing.
             </p>
           </div>
           <Link
-            href={`/claim/${pendingClaim.claim_token}`}
+            href={`/claim/${pendingClaimToken}`}
             className={cn(buttonVariants(), 'shrink-0 gap-2')}
           >
             Claim your listing →

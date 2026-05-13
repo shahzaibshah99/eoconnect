@@ -41,8 +41,8 @@ interface ParsedRow {
   city?: string
 }
 
-const REQUIRED_HEADERS = ['email', 'full_name'] as const
-const OPTIONAL_HEADERS = ['business_name', 'business_url', 'linkedin_url', 'region', 'country', 'city'] as const
+const REQUIRED_HEADERS = ['email', 'full_name', 'business_url', 'linkedin_url'] as const
+const OPTIONAL_HEADERS = ['business_name', 'region', 'country', 'city'] as const
 const ALL_HEADERS = [...REQUIRED_HEADERS, ...OPTIONAL_HEADERS]
 
 export function CmImportsView({
@@ -265,12 +265,16 @@ function parseCsv(text: string): { error: string | null; rows: ParsedRow[]; warn
     for (let j = 0; j < headers.length; j++) {
       obj[headers[j]] = (fields[j] ?? '').trim()
     }
-    if (!obj.email || !obj.full_name) {
-      warnings.push(`Row ${i + 1} skipped — missing email or full_name`)
+    if (!obj.email || !obj.full_name || !obj.business_url || !obj.linkedin_url) {
+      warnings.push(`Row ${i + 1} skipped — missing email, full_name, business_url, or linkedin_url`)
       continue
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(obj.email)) {
       warnings.push(`Row ${i + 1} skipped — invalid email "${obj.email}"`)
+      continue
+    }
+    if (obj.linkedin_url && /linkedin\.com\/in\//i.test(obj.linkedin_url)) {
+      warnings.push(`Row ${i + 1} skipped — linkedin_url is a personal profile (/in/). Use the company page URL (/company/...) instead.`)
       continue
     }
     rows.push({

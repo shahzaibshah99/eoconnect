@@ -44,6 +44,19 @@ const nextConfig: NextConfig = {
         hostname: 'images.pexels.com',
         pathname: '/**',
       },
+      // Allow any external hostname for scraped business logos and cover
+      // images from pre-populated CSV imports. These come from arbitrary
+      // company websites so we can't enumerate every hostname in advance.
+      {
+        protocol: 'https',
+        hostname: '**',
+        pathname: '/**',
+      },
+      {
+        protocol: 'http',
+        hostname: '**',
+        pathname: '/**',
+      },
     ],
   },
 };
