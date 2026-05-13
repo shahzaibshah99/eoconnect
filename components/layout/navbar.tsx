@@ -7,6 +7,7 @@ import { Settings, User, Menu, ShieldAlert, ShieldCheck } from 'lucide-react'
 import {
 } from '@/components/ui/dialog'
 import { ThemeToggle } from './theme-toggle'
+import { GoogleTranslate } from './google-translate'
 import { Logo } from './logo'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -120,7 +121,7 @@ export function Navbar({
             <Logo height={36} className="hidden sm:block" />
             <Logo variant="mark" height={36} className="sm:hidden" />
           </Link>
-          <nav className="hidden md:flex items-center gap-1">
+          <nav className="hidden md:flex items-center gap-0.5">
             {navLinks.map(link => {
               if (link.href === '/dashboard/messages') {
                 return (
@@ -128,7 +129,7 @@ export function Navbar({
                     key={link.href}
                     userId={profile?.id ?? null}
                     initialUnread={unreadMessages}
-                    baseClass="px-4 py-2 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5"
+                    baseClass="px-3 py-2 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5 whitespace-nowrap"
                     activeClass="bg-primary/10 text-primary"
                     idleClass="text-muted-foreground hover:text-foreground hover:bg-muted"
                   />
@@ -139,7 +140,7 @@ export function Navbar({
                   key={link.href}
                   href={link.href}
                   className={cn(
-                    'px-4 py-2 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5',
+                    'px-3 py-2 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5 whitespace-nowrap',
                     (link.href === '/dashboard' ? pathname === '/dashboard' : pathname.startsWith(link.href))
                       ? 'bg-primary/10 text-primary'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted'
@@ -163,6 +164,7 @@ export function Navbar({
             ownedBusinessIds={ownedBusinessIds}
           />
           <SupportButton memberName={profile?.full_name ?? null} />
+          <GoogleTranslate />
           <ThemeToggle />
           <Link
             href="/dashboard/services/new"

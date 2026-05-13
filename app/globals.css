@@ -112,3 +112,17 @@
     font-family: var(--font-sans);
   }
 }
+
+/* ── Google Translate ────────────────────────────────────────────
+   When translation is active Google adds .translated-ltr/.translated-rtl
+   to <body> and renders a ~40px bar fixed at the top of the viewport.
+   Shift the sticky navbar down so it sits below the bar instead of
+   behind it. Suppress the floating tooltip (no value to members).
+   ────────────────────────────────────────────────────────────── */
+body.translated-ltr header.sticky,
+body.translated-rtl header.sticky {
+  top: 40px !important;
+}
+
+#goog-gt-tt { display: none !important; }
+#gt-engine-hidden { display: none !important; }

@@ -21,7 +21,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={plusJakartaSans.variable}>
+      <body className={plusJakartaSans.variable} suppressHydrationWarning>
         <ThemeProvider
           attribute="data-theme"
           defaultTheme="light"

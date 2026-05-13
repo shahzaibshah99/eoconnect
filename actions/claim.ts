@@ -248,17 +248,24 @@ export async function completeClaim(token: string): Promise<{ error: string | nu
 
   if (error) return { error: error.message }
 
-  // Stamp onboarded_at on the claimer's profile so the proxy's
-  // onboarding/business gate never fires for them. Without this, new
-  // users who claim a listing before completing the normal onboarding
-  // wizard get indefinitely bounced between /onboarding and /get-started
-  // because onboarded_at is only set by the business wizard otherwise.
-  // Best-effort — a failure here is not fatal; the claim still succeeds.
+  // Auto-verify the claimer as 'eo_member'.
+  //
+  // Per CEO + marketing decision: members who receive a claim email
+  // are sourced from a trusted EO member list (Dripify / CSV import).
+  // The fact they received and acted on the invite is sufficient proof
+  // of membership — requiring a screenshot upload on top is redundant
+  // friction. Organic sign-ups (not via claim link) still go through
+  // the normal verification queue.
+  //
+  // Also stamps onboarded_at so the proxy never bounces claimed users
+  // back to /onboarding or /get-started.
   await svc
     .from('profiles')
-    .update({ onboarded_at: new Date().toISOString() })
+    .update({
+      verification_tag: 'eo_member',
+      onboarded_at: new Date().toISOString(),
+    })
     .eq('id', user.id)
-    .is('onboarded_at', null)
 
   // Audit. Best-effort but loud — same pattern as actions/admin.ts.
   const { error: logErr } = await svc.from('events_log').insert({
