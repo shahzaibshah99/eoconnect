@@ -48,6 +48,10 @@ export default async function GetStartedPage() {
   // If they've already done both steps, send them to the dashboard.
   if (isVerified && hasBusiness) redirect('/dashboard')
 
+  // If there's a pre-populated listing waiting for their email,
+  // send them straight to the claim page — skip the two-step flow entirely.
+  if (hasPendingClaim && pendingClaim) redirect(`/claim/${pendingClaim.claim_token}`)
+
   const name = profile?.full_name?.split(' ')[0] ?? 'there'
 
   return (
