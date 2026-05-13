@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import { Eye, Search, MessageCircle, LayoutList, Inbox, Megaphone, UserCog, Building2, Layers, Plus, MessageSquare, ExternalLink } from 'lucide-react'
+import { Eye, Search, MessageCircle, LayoutList, Inbox, Megaphone, UserCog, Building2, Layers, Plus, MessageSquare, ExternalLink, Handshake } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { ADS_ENABLED } from '@/lib/feature-flags'
 import { StatsCard } from '@/components/dashboard/stats-card'
@@ -155,6 +155,25 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
   const businessNeeds = ((needsPosts ?? []) as NeedsPost[]).filter(p => p.board_type === 'business').slice(0, 5)
   const communityAsks = ((needsPosts ?? []) as NeedsPost[]).filter(p => p.board_type === 'community').slice(0, 5)
+
+  // Endorsements received on ALL the member's businesses
+  const allBusinessIds = allBusinesses.map(b => b.id)
+  const { data: endorsementsReceived } = allBusinessIds.length > 0
+    ? await db
+        .from('endorsements')
+        .select('id, text, created_at, business_id, profiles!from_member_id(full_name, avatar_url)')
+        .in('business_id', allBusinessIds)
+        .order('created_at', { ascending: false })
+        .limit(5) as {
+          data: Array<{
+            id: string
+            text: string | null
+            created_at: string
+            business_id: string
+            profiles?: { full_name?: string | null; avatar_url?: string | null } | null
+          }> | null
+        }
+    : { data: null }
 
   // My Posts — member's own bulletin posts (both board types), most recent first
   const { data: myPosts } = await db
@@ -318,6 +337,50 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         </section>
       )}
 
+      {/* My Listings — all businesses with freshness indicators */}
+      <section className="space-y-3 pt-4 border-t border-border">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">My Listings</h2>
+          <Link href="/dashboard/business/edit" className="text-xs text-primary hover:underline">Manage all →</Link>
+        </div>
+        <div className="space-y-2">
+          {allBusinesses.map(b => {
+            const daysSince = Math.floor((Date.now() - new Date(b.created_at ?? Date.now()).getTime()) / (24 * 60 * 60 * 1000))
+            const freshness = b.slow_replier
+              ? { dot: 'bg-muted-foreground/40', label: 'Slow replier', color: 'text-muted-foreground' }
+              : daysSince >= 60
+                ? { dot: 'bg-yellow-500', label: 'Low activity', color: 'text-yellow-600 dark:text-yellow-400' }
+                : { dot: 'bg-green-500', label: 'Active', color: 'text-green-600 dark:text-green-400' }
+            return (
+              <div key={b.id} className="flex items-center gap-3 p-3 rounded-lg bg-card border border-border">
+                <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{b.name}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className={`flex items-center gap-1 text-[11px] ${freshness.color}`}>
+                      <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${freshness.dot}`} />
+                      {freshness.label}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground capitalize">· {b.status}</span>
+                  </div>
+                </div>
+                <Link href={`/marketplace/${b.id}`} target="_blank" rel="noopener noreferrer"
+                  className="text-[11px] text-primary hover:underline shrink-0">
+                  View →
+                </Link>
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* Needs & Leads feed — moved above My Posts (defect #6 fix) */}
+      <NeedsLeadsFeed
+        businessNeeds={businessNeeds}
+        communityAsks={communityAsks}
+        country={business.country ?? null}
+      />
+
       {/* My Posts — member's own bulletin board posts */}
       {myPosts && myPosts.length > 0 && (
         <section className="space-y-3 pt-4 border-t border-border">
@@ -353,12 +416,31 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         </section>
       )}
 
-      {/* Needs & Leads feed — open bulletin posts relevant to this member */}
-      <NeedsLeadsFeed
-        businessNeeds={businessNeeds}
-        communityAsks={communityAsks}
-        country={business.country ?? null}
-      />
+      {/* Endorsements Received */}
+      {endorsementsReceived && endorsementsReceived.length > 0 && (
+        <section className="space-y-3 pt-4 border-t border-border">
+          <div className="flex items-center gap-2">
+            <Handshake className="h-4 w-4 text-primary" />
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+              Endorsements Received ({endorsementsReceived.length})
+            </h2>
+          </div>
+          <div className="space-y-2">
+            {endorsementsReceived.map(e => {
+              const bizName = allBusinesses.find(b => b.id === e.business_id)?.name
+              return (
+                <div key={e.id} className="p-3 rounded-lg bg-card border border-border text-sm">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium">{e.profiles?.full_name ?? 'A member'}</span>
+                    {bizName && <span className="text-muted-foreground text-xs">endorsed {bizName}</span>}
+                  </div>
+                  {e.text && <p className="text-muted-foreground mt-1 text-xs">&ldquo;{e.text}&rdquo;</p>}
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Analytics — secondary, below the fold */}
       <section className="space-y-4 pt-4 border-t border-border">

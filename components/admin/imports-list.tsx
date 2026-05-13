@@ -316,8 +316,8 @@ function RejectDialog({
 
 // ── Upload flow ───────────────────────────────────────────────
 
-const REQUIRED_HEADERS = ['email', 'full_name', 'business_url', 'linkedin_url'] as const
-const OPTIONAL_HEADERS = ['business_name', 'region', 'country', 'city'] as const
+const REQUIRED_HEADERS = ['email', 'full_name', 'business_url'] as const
+const OPTIONAL_HEADERS = ['linkedin_url', 'business_name', 'region', 'country', 'city'] as const
 const ALL_HEADERS = [...REQUIRED_HEADERS, ...OPTIONAL_HEADERS]
 
 function UploadDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
@@ -521,8 +521,8 @@ function parseCsv(text: string): {
     for (let j = 0; j < headers.length; j++) {
       obj[headers[j]] = (fields[j] ?? '').trim()
     }
-    if (!obj.email || !obj.full_name || !obj.business_url || !obj.linkedin_url) {
-      warnings.push(`Row ${i + 1} skipped — missing email, full_name, business_url, or linkedin_url`)
+    if (!obj.email || !obj.full_name || !obj.business_url) {
+      warnings.push(`Row ${i + 1} skipped — missing email, full_name, or business_url`)
       continue
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(obj.email)) {

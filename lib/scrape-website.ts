@@ -172,6 +172,35 @@ export async function scrapeWebsiteBasics(url: string): Promise<ScrapeResult> {
       }
     }
 
+    // ── Founded year text fallback ───────────────────────────────
+    // When JSON-LD doesn't have foundingDate, scan the page text for
+    // common patterns: "Founded in 2015", "Est. 2010", "Since 2008",
+    // "Established 2012", "Founded 2018"
+    if (!result.founded_year) {
+      const plainText = html
+        .replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/<style[\s\S]*?<\/style>/gi, '')
+        .replace(/<[^>]+>/g, ' ')
+      const yearPatterns = [
+        /founded\s+in\s+((?:19|20)\d{2})/i,
+        /founded\s+((?:19|20)\d{2})/i,
+        /est(?:ablished)?\.?\s+((?:19|20)\d{2})/i,
+        /since\s+((?:19|20)\d{2})/i,
+        /incorporated\s+in\s+((?:19|20)\d{2})/i,
+        /established\s+in\s+((?:19|20)\d{2})/i,
+      ]
+      for (const pat of yearPatterns) {
+        const m = plainText.match(pat)
+        if (m) {
+          const y = parseInt(m[1])
+          if (y > 1800 && y <= new Date().getFullYear()) {
+            result.founded_year = y
+            break
+          }
+        }
+      }
+    }
+
   } catch {
     // Timeout, DNS failure, TLS — return what we have
   }
