@@ -67,7 +67,10 @@ const BusinessSchema = z.object({
     v => (v === '' || v === null || v === undefined ? undefined : Number(v)),
     z.number().min(1900).max(new Date().getFullYear()).optional()
   ),
-  team_size: z.enum(['1-10', '11-50', '51-200', '201-500', '500+']).optional(),
+  team_size: z.preprocess(
+    v => (v === '' || v === null || v === undefined ? undefined : v),
+    z.enum(['1-10', '11-50', '51-200', '201-500', '500+']).optional()
+  ),
   city: z.string().optional(),
   country: z.string().optional(),
   country_code: z.string().length(2).optional().or(z.literal('')),
@@ -369,11 +372,13 @@ export async function updateBusiness(id: string, formData: FormData): Promise<Bu
     // we'd still only mutate the row we checked. Note: existing.owner_id is
     // used (not user.id) so admin overrides above still work — admins keep
     // editing as the listing's actual owner.
-    const { error } = await db
-      .from('businesses')
-      .update(updateData)
-      .eq('id', id)
-      .eq('owner_id', existing.owner_id) as { error: { code?: string; message: string } | null }
+    // For unclaimed pre-populated listings owner_id is null — use
+    // .is() not .eq() to avoid "invalid input syntax for type uuid: null"
+    let updateQuery = db.from('businesses').update(updateData).eq('id', id)
+    updateQuery = existing.owner_id
+      ? updateQuery.eq('owner_id', existing.owner_id)
+      : updateQuery.is('owner_id', null)
+    const { error } = await updateQuery as { error: { code?: string; message: string } | null }
     if (error) {
       // Same race-loser handling as createBusiness — re-look-up the
       // colliding owner so we can return the right friendly message.

@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Progress } from '@/components/ui/progress'
-import { ChevronRight, ChevronLeft, Upload, X, FileText } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Upload, X, FileText, Sparkles, Loader2 } from 'lucide-react'
 import type { Category } from '@/types/database'
 import { LocationPicker } from '@/components/forms/location-picker'
 import { YearPicker } from '@/components/forms/year-picker'
@@ -25,6 +25,7 @@ import {
 import { cn } from '@/lib/utils'
 import { LinkedInAutofillBanner } from '@/components/forms/linkedin-autofill-banner'
 import type { LinkedInAutofill } from '@/actions/linkedin-autofill'
+import { generateTagline } from '@/actions/ai-tagline'
 
 const STEPS = ['Business Basics', 'Categories & Keywords', 'Contact Details', 'Media', 'Review & Publish']
 const TEAM_SIZES = ['1-10', '11-50', '51-200', '201-500', '500+'] as const
@@ -37,6 +38,8 @@ export function BusinessProfileWizard({ categories }: WizardProps) {
   const [step, setStep] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+  const [isGeneratingTagline, setIsGeneratingTagline] = useState(false)
+  const [taglineError, setTaglineError] = useState<string | null>(null)
 
   const [formData, setFormData] = useState({
     name: '', tagline: '', description: '', website: '',
@@ -84,6 +87,24 @@ export function BusinessProfileWizard({ categories }: WizardProps) {
    * stay null — the submit flow looks for prefilled URLs as a
    * fallback when no File is set.
    */
+  const handleGenerateTagline = async () => {
+    if (!formData.name.trim() && !formData.description.trim()) {
+      setTaglineError('Add a business name or description first')
+      return
+    }
+    setIsGeneratingTagline(true)
+    setTaglineError(null)
+    const res = await generateTagline({
+      name: formData.name,
+      description: formData.description,
+      tags: formData.tags,
+      website: formData.website,
+    })
+    setIsGeneratingTagline(false)
+    if (res.error) { setTaglineError(res.error); return }
+    if (res.tagline) update('tagline', res.tagline)
+  }
+
   const handleAutofill = (data: LinkedInAutofill) => {
     setFormData(prev => ({
       ...prev,
@@ -279,8 +300,22 @@ export function BusinessProfileWizard({ categories }: WizardProps) {
               <Input id="name" value={formData.name} onChange={e => update('name', e.target.value)} placeholder="Acme Consulting Ltd." required />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="tagline">Tagline *</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="tagline">Tagline *</Label>
+                <button
+                  type="button"
+                  onClick={handleGenerateTagline}
+                  disabled={isGeneratingTagline}
+                  className="inline-flex items-center gap-1 text-xs text-primary hover:text-primary/80 disabled:opacity-50 transition-colors"
+                >
+                  {isGeneratingTagline
+                    ? <><Loader2 className="h-3 w-3 animate-spin" /> Generating…</>
+                    : <><Sparkles className="h-3 w-3" /> AI generate</>
+                  }
+                </button>
+              </div>
               <Input id="tagline" value={formData.tagline} onChange={e => update('tagline', e.target.value)} placeholder="One-line description of what you do" required />
+              {taglineError && <p className="text-xs text-destructive">{taglineError}</p>}
             </div>
             <div className="space-y-2">
               <Label htmlFor="description">Description *</Label>

@@ -5,11 +5,13 @@ import { z } from 'zod'
 
 const TagsSchema = z.object({
   tags: z.array(z.string().max(40)).max(10),
+  tagline: z.string().max(120),
   description: z.string().max(2000),
 })
 
 export interface GeneratedBusinessData {
   tags: string[]
+  tagline: string
   description: string
 }
 
@@ -46,8 +48,9 @@ export async function generateBusinessTags(input: {
       prompt: `You generate business listing data for a B2B marketplace for EO (Entrepreneurs' Organization) members.
 
 Given the business details below, return:
-- "tags": array of 5-10 short keyword tags (max 4 words each) that best describe what this business does. Think services, industries, expertise. Examples: "AI Consulting", "Legal Services", "Financial Planning", "Web Development"
-- "description": a clean, professional 2-3 sentence description written in third person. Max 300 characters. Only use provided info — do not invent facts.
+- "tagline": a SHORT punchy phrase (max 8 words) that captures what the business does. Must NOT repeat the description. Think: "Practical AI for business" or "Women-only fitness clubs across Australia". No full sentences.
+- "description": a clean 2-3 sentence description in third person. Different wording from the tagline. Max 250 characters. Only use provided info — do not invent facts.
+- "tags": 5-10 short keyword tags (max 4 words each). Examples: "AI Consulting", "Legal Services", "Fitness Training"
 
 Business details:
 ${context}`,

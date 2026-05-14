@@ -317,7 +317,7 @@ export async function markCsvImportProcessed(id: string): Promise<{
       name: businessName,
       email: r.email,
       full_name: r.full_name,
-      tagline: webScraped?.tagline || (rawDesc ? rawDesc.slice(0, 110) : ''),
+      tagline: aiData?.tagline || webScraped?.tagline || '',
       description: aiData?.description || rawDesc || '',
       website: r.business_url?.trim() || '',
       logo_url: linkedIn?.logo_url || webScraped?.logo_url || '',
@@ -338,7 +338,7 @@ export async function markCsvImportProcessed(id: string): Promise<{
     }
     created++
 
-    const sendRes = await _sendClaimEmail(svc, createRes.business_id)
+    const sendRes = await _sendClaimEmail(svc, createRes.business_id, r.full_name)
     if (sendRes.error) {
       const msg = `${r.email}: ${sendRes.error}`
       console.error('[csv-processor] email failed:', msg)
@@ -346,9 +346,18 @@ export async function markCsvImportProcessed(id: string): Promise<{
     }
   }
 
+  // Save the processing result back into the import record so the
+  // admin UI can show it via the (i) icon without needing a separate query.
   await svc
     .from('csv_imports')
-    .update({ status: 'processed', processed_at: new Date().toISOString() })
+    .update({
+      status: 'processed',
+      processed_at: new Date().toISOString(),
+      payload: {
+        rows: rows,
+        result: { created, skipped, rowErrors, emailErrors },
+      },
+    })
     .eq('id', id)
 
   await logEvent(svc, 'csv_import_processed', ctx.user!.id, id, {
@@ -362,4 +371,55 @@ export async function markCsvImportProcessed(id: string): Promise<{
   revalidatePath('/admin/imports')
   revalidatePath('/marketplace')
   return { error: null, created, skipped, rowErrors, emailErrors }
+}
+
+// ── Per-import claim status ───────────────────────────────────
+//
+// Given an import's email list (from payload.rows), look up how many
+// of those businesses have been claimed so far.
+
+export async function getImportClaimStatus(emails: string[]): Promise<{
+  error: string | null
+  claimed: number
+  pending: number
+  details: Array<{ email: string; claimed: boolean; claimed_by: string | null; claimed_at: string | null }>
+}> {
+  const ctx = await requireAdmin()
+  if (ctx.error) return { error: ctx.error, claimed: 0, pending: 0, details: [] }
+  if (!emails.length) return { error: null, claimed: 0, pending: 0, details: [] }
+
+  const svc = adminDb()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = svc as any
+
+  const { data: businesses } = await db
+    .from('businesses')
+    .select('email, claimed_at, owner_id, profiles!owner_id(full_name)')
+    .in('email', emails.map(e => e.toLowerCase()))
+    .eq('is_pre_populated', true) as {
+    data: Array<{
+      email: string
+      claimed_at: string | null
+      owner_id: string | null
+      profiles?: { full_name?: string | null } | null
+    }> | null
+  }
+
+  const bizMap = new Map((businesses ?? []).map(b => [b.email?.toLowerCase(), b]))
+  const details = emails.map(email => {
+    const biz = bizMap.get(email.toLowerCase())
+    return {
+      email,
+      claimed: !!biz?.claimed_at,
+      claimed_by: biz?.profiles?.full_name ?? null,
+      claimed_at: biz?.claimed_at ?? null,
+    }
+  })
+
+  return {
+    error: null,
+    claimed: details.filter(d => d.claimed).length,
+    pending: details.filter(d => !d.claimed).length,
+    details,
+  }
 }

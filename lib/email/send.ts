@@ -47,14 +47,12 @@ export async function sendEmail(opts: {
   to: string
   subject: string
   html: string
-  /** Optional Reply-To header — used for support inquiries so the
-   *  support team can reply directly to the member without going
-   *  through the from-address (which is the platform mailbox). */
   replyTo?: string
 }): Promise<{ ok: boolean; error?: string }> {
   const t = getTransport()
   if (!t) {
     console.warn(`[email] skipped — SMTP_HOST not configured (would send "${opts.subject}" to ${opts.to})`)
+    void logEmailEvent({ to: opts.to, subject: opts.subject, status: 'skipped', error: 'SMTP not configured' })
     return { ok: false, error: 'SMTP not configured' }
   }
   try {
@@ -65,10 +63,42 @@ export async function sendEmail(opts: {
       html: opts.html,
       replyTo: opts.replyTo,
     })
+    void logEmailEvent({ to: opts.to, subject: opts.subject, status: 'sent' })
     return { ok: true }
   } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : 'unknown'
     console.error('[email] send failed:', err)
-    return { ok: false, error: err instanceof Error ? err.message : 'unknown' }
+    void logEmailEvent({ to: opts.to, subject: opts.subject, status: 'failed', error: errorMsg })
+    return { ok: false, error: errorMsg }
+  }
+}
+
+async function logEmailEvent(data: {
+  to: string
+  subject: string
+  status: 'sent' | 'failed' | 'skipped'
+  error?: string
+}) {
+  try {
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY || !process.env.NEXT_PUBLIC_SUPABASE_URL) return
+    const { createClient } = await import('@supabase/supabase-js')
+    const svc = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      { auth: { persistSession: false } }
+    )
+    await svc.from('events_log').insert({
+      type: 'email_sent',
+      metadata: {
+        to: data.to,
+        subject: data.subject,
+        status: data.status,
+        error: data.error ?? null,
+      },
+      tenant_id: 'eo',
+    })
+  } catch {
+    // Never let logging crash the email send path
   }
 }
 

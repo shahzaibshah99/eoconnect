@@ -41,8 +41,19 @@ export default async function AdminMembersPage() {
     }> | null
   }
 
+  // Invited = pre-populated listings that haven't been claimed yet
+  const { data: invitedListings } = await db
+    .from('businesses')
+    .select('id, name, email, created_at, claim_email_sent_at')
+    .eq('is_pre_populated', true)
+    .is('owner_id', null)
+    .order('created_at', { ascending: false })
+    .limit(200) as {
+    data: Array<{ id: string; name: string; email: string | null; created_at: string; claim_email_sent_at: string | null }> | null
+  }
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Members</h1>
         <p className="text-sm text-muted-foreground mt-1">
@@ -51,6 +62,48 @@ export default async function AdminMembersPage() {
             : 'All members across all chapters.'}
         </p>
       </div>
+
+      {/* Invited / unclaimed listings */}
+      {invitedListings && invitedListings.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-semibold">Invited — awaiting claim ({invitedListings.length})</h2>
+            <span className="text-[11px] bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border border-yellow-500/20 px-2 py-0.5 rounded-full font-medium">
+              Claim email sent · no account yet
+            </span>
+          </div>
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted border-b border-border">
+                <tr>
+                  <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Business</th>
+                  <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Email invited</th>
+                  <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Invited</th>
+                  <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Claim email sent</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {invitedListings.map(l => (
+                  <tr key={l.id} className="hover:bg-muted/30 transition-colors">
+                    <td className="px-4 py-2.5 font-medium">{l.name}</td>
+                    <td className="px-4 py-2.5 text-muted-foreground">{l.email ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-muted-foreground text-xs">
+                      {new Date(l.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs">
+                      {l.claim_email_sent_at
+                        ? <span className="text-green-600 dark:text-green-400">✓ {new Date(l.claim_email_sent_at).toLocaleDateString()}</span>
+                        : <span className="text-yellow-600">Pending</span>
+                      }
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <MembersTable
         members={members ?? []}
         canChangeRole={me?.role === 'super_admin'}

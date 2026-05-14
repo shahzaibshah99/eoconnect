@@ -33,7 +33,7 @@ export default async function AdminImportsPage() {
     .from('csv_imports')
     .select(`
       id, source, row_count, status, rejection_reason, chapter_id,
-      reviewed_at, processed_at, created_at,
+      reviewed_at, processed_at, created_at, payload,
       submitted:profiles!submitted_by ( full_name, avatar_url, eo_membership_email ),
       reviewer:profiles!reviewed_by ( full_name ),
       eo_chapters!chapter_id ( name )

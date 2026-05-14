@@ -114,7 +114,8 @@ export async function _createPrePopulatedListing(
  */
 export async function _sendClaimEmail(
   svc: ReturnType<typeof adminDb>,
-  businessId: string
+  businessId: string,
+  recipientName?: string
 ): Promise<{ error: string | null }> {
   const { data: biz } = await svc
     .from('businesses')
@@ -126,7 +127,9 @@ export async function _sendClaimEmail(
   if (!biz.claim_token) return { error: 'Business has no claim token' }
 
   const claimUrl = `${siteUrl()}/claim/${biz.claim_token}`
-  const tpl = claimReminderEmail('there', biz.name, 60, claimUrl)
+  // Use the recipient's first name if provided, otherwise 'there'
+  const firstName = recipientName?.split(' ')[0]?.trim() || 'there'
+  const tpl = claimReminderEmail(firstName, biz.name, 60, claimUrl)
   const result = await sendEmail({ to: biz.email, subject: tpl.subject, html: tpl.html })
   if (!result.ok) return { error: result.error ?? 'Email send failed' }
 
@@ -214,7 +217,6 @@ export async function previewClaim(token: string): Promise<{ error: string | nul
  * Sets:
  *   businesses.owner_id = auth.uid()
  *   businesses.claimed_at = now()
- *   businesses.is_pre_populated = false  (it's no longer awaiting claim)
  *   businesses.claim_token = null         (one-shot — link is dead now)
  */
 export async function completeClaim(token: string): Promise<{ error: string | null; business_id?: string }> {
@@ -249,7 +251,6 @@ export async function completeClaim(token: string): Promise<{ error: string | nu
     .update({
       owner_id: user.id,
       claimed_at: new Date().toISOString(),
-      is_pre_populated: false,
       claim_token: null,
       claim_token_expires_at: null,
     })

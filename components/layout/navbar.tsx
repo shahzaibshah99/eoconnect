@@ -72,7 +72,7 @@ export function Navbar({
       <div className="mx-auto max-w-[1280px] px-3 sm:px-4 md:px-6 flex h-16 items-center justify-between gap-2">
         <div className="flex items-center gap-8 min-w-0">
           {/* Mobile hamburger — opens nav links in a dropdown */}
-          <div className="lg:hidden">
+          <div className="xl:hidden">
             <DropdownMenu>
               <DropdownMenuTrigger className="-ml-1 inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Open menu">
                 <Menu className="h-5 w-5" />
@@ -121,7 +121,7 @@ export function Navbar({
             <Logo height={36} className="hidden sm:block" />
             <Logo variant="mark" height={36} className="sm:hidden" />
           </Link>
-          <nav className="hidden lg:flex items-center gap-0.5">
+          <nav className="hidden xl:flex items-center gap-0.5">
             {navLinks.map(link => {
               if (link.href === '/dashboard/messages') {
                 return (
@@ -168,7 +168,7 @@ export function Navbar({
           <ThemeToggle />
           <Link
             href="/dashboard/services/new"
-            className={cn(buttonVariants({ size: 'sm' }), 'hidden lg:inline-flex bg-primary text-primary-foreground font-bold ml-1')}
+            className={cn(buttonVariants({ size: 'sm' }), 'hidden xl:inline-flex bg-primary text-primary-foreground font-bold ml-1')}
           >
             Add Service
           </Link>

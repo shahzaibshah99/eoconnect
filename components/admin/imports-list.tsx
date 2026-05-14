@@ -16,7 +16,8 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Textarea } from '@/components/ui/textarea'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { format, formatDistanceToNow } from 'date-fns'
-import { Upload, FileSpreadsheet, Check, X, PlayCircle } from 'lucide-react'
+import { Upload, FileSpreadsheet, Check, X, PlayCircle, Info, ChevronDown, ChevronUp, CheckCircle2, Clock } from 'lucide-react'
+import { getImportClaimStatus } from '@/actions/imports'
 import { cn } from '@/lib/utils'
 
 type Status = 'pending' | 'approved' | 'rejected' | 'processed'
@@ -32,6 +33,15 @@ export interface ImportRow {
   reviewed_at: string | null
   processed_at: string | null
   created_at: string
+  payload?: {
+    rows?: Array<{ email: string; full_name?: string }>
+    result?: {
+      created: number
+      skipped: number
+      rowErrors: string[]
+      emailErrors: string[]
+    }
+  } | null
   submitted: { full_name: string | null; avatar_url: string | null; eo_membership_email: string | null } | null
   reviewer: { full_name: string | null } | null
   eo_chapters: { name: string } | null
@@ -185,6 +195,14 @@ function ImportRowItem({ row }: { row: ImportRow }) {
                 <span className="font-medium">Reason:</span> {row.rejection_reason}
               </p>
             )}
+            {/* (i) icon — shows processing result for processed imports */}
+            {row.status === 'processed' && row.payload?.result && (
+              <ProcessingResult result={row.payload.result} />
+            )}
+            {/* Claim status — shows per-email claimed/pending for processed imports */}
+            {row.status === 'processed' && row.payload?.rows && row.payload.rows.length > 0 && (
+              <ClaimStatus emails={row.payload.rows.map(r => r.email).filter(Boolean)} />
+            )}
           </div>
         </div>
 
@@ -311,6 +329,130 @@ function RejectDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// ── Claim status for a processed import ──────────────────────
+
+function ClaimStatus({ emails }: { emails: string[] }) {
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [data, setData] = useState<{
+    claimed: number; pending: number
+    details: Array<{ email: string; claimed: boolean; claimed_by: string | null; claimed_at: string | null }>
+  } | null>(null)
+
+  const load = async () => {
+    if (data) { setOpen(v => !v); return }
+    setLoading(true)
+    const res = await getImportClaimStatus(emails)
+    if (!res.error) setData(res)
+    setLoading(false)
+    setOpen(true)
+  }
+
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        onClick={load}
+        disabled={loading}
+        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+      >
+        {loading ? (
+          <span className="h-3 w-3 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+        ) : open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        Claim status
+        {data && (
+          <span className="ml-1 font-medium text-green-600 dark:text-green-400">
+            {data.claimed}/{emails.length} claimed
+          </span>
+        )}
+      </button>
+
+      {open && data && (
+        <div className="mt-2 rounded-lg border border-border bg-muted/30 overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-muted border-b border-border">
+              <tr>
+                <th className="text-left px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Email</th>
+                <th className="text-left px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
+                <th className="text-left px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Claimed by</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {data.details.map(d => (
+                <tr key={d.email} className={d.claimed ? 'bg-green-500/5' : ''}>
+                  <td className="px-3 py-1.5 font-mono truncate max-w-[180px]" title={d.email}>{d.email}</td>
+                  <td className="px-3 py-1.5">
+                    {d.claimed ? (
+                      <span className="flex items-center gap-1 text-green-600 dark:text-green-400 font-medium">
+                        <CheckCircle2 className="h-3 w-3" /> Claimed
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-yellow-600 dark:text-yellow-400">
+                        <Clock className="h-3 w-3" /> Pending
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-1.5 text-muted-foreground">
+                    {d.claimed_by ?? '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Processing result (i) icon ───────────────────────────────
+
+function ProcessingResult({ result }: {
+  result: { created: number; skipped: number; rowErrors: string[]; emailErrors: string[] }
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+      >
+        <Info className="h-3.5 w-3.5" />
+        Processing details
+      </button>
+      {open && (
+        <div className="mt-2 p-3 rounded-lg bg-muted/40 border border-border text-xs space-y-1.5">
+          <p className={result.created > 0 ? 'text-green-700 dark:text-green-400 font-medium' : 'text-muted-foreground'}>
+            ✓ {result.created} listing{result.created !== 1 ? 's' : ''} created · claim emails sent
+          </p>
+          {result.skipped > 0 && (
+            <p className="text-muted-foreground">
+              ↷ {result.skipped} skipped (email already on file)
+            </p>
+          )}
+          {result.rowErrors.length > 0 && (
+            <div>
+              <p className="text-red-600 font-medium mb-0.5">Listing errors:</p>
+              <ul className="list-disc pl-4 space-y-0.5 font-mono text-red-700 dark:text-red-400">
+                {result.rowErrors.map((e, i) => <li key={i}>{e}</li>)}
+              </ul>
+            </div>
+          )}
+          {result.emailErrors.length > 0 && (
+            <div>
+              <p className="text-yellow-700 font-medium mb-0.5">Email errors:</p>
+              <ul className="list-disc pl-4 space-y-0.5 font-mono">
+                {result.emailErrors.map((e, i) => <li key={i}>{e}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -533,12 +675,23 @@ function parseCsv(text: string): {
       warnings.push(`Row ${i + 1} skipped — linkedin_url is a personal profile (/in/). Use the company page URL (/company/...) instead.`)
       continue
     }
+    // Auto-add https:// if protocol is missing so members don't
+    // need to type it — 'fernwoodfitness.com.au' becomes valid.
+    const rawUrl = obj.business_url?.trim() || ''
+    const businessUrl = rawUrl && !rawUrl.startsWith('http://') && !rawUrl.startsWith('https://')
+      ? `https://${rawUrl}`
+      : rawUrl
+    const rawLiUrl = obj.linkedin_url?.trim() || ''
+    const linkedinUrl = rawLiUrl && !rawLiUrl.startsWith('http://') && !rawLiUrl.startsWith('https://')
+      ? `https://${rawLiUrl}`
+      : rawLiUrl
+
     rows.push({
       email: obj.email.toLowerCase(),
       full_name: obj.full_name,
       business_name: obj.business_name || '',
-      business_url: obj.business_url || '',
-      linkedin_url: obj.linkedin_url || '',
+      business_url: businessUrl,
+      linkedin_url: linkedinUrl,
       region: obj.region || '',
       country: obj.country || '',
       city: obj.city || '',
