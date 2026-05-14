@@ -507,25 +507,222 @@ export function inquiryClaimEmail(input: {
   }
 }
 
-export function claimReminderEmail(name: string, businessName: string, daysLeft: number, claimUrl: string) {
-  return {
-    subject: `Claim your Member Market profile — ${businessName}`,
-    html: wrap('Claim your profile', `
-      <h1 style="font-size:18px;margin:0 0 12px;">Hi ${escapeHtml(name)} — your profile is waiting</h1>
-      <p style="font-size:14px;color:#444;line-height:1.5;">
-        We&apos;ve pre-populated a Member Market listing for <strong>${escapeHtml(businessName)}</strong>.
-        Claim it to take ownership, edit the details, and start receiving inquiries from fellow EO members.
-      </p>
-      <p style="margin-top:20px;">
-        <a href="${claimUrl}" style="background:#0A2218;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;">
-          Claim your profile
-        </a>
-      </p>
-      <p style="font-size:12px;color:#888;margin-top:16px;">
-        ${daysLeft > 0 ? `${daysLeft} day${daysLeft === 1 ? '' : 's'} left to claim.` : 'Claim window has expired but your listing remains live.'}
-      </p>
-    `)
-  }
+export function claimReminderEmail(input: {
+  name: string
+  businessName: string
+  businessUrl?: string | null
+  daysLeft: number
+  claimUrl: string
+  removeUrl?: string
+}) {
+  const { name, businessName, businessUrl, daysLeft, claimUrl, removeUrl } = input
+  const safeName = escapeHtml(name)
+  const safeBizName = escapeHtml(businessName)
+  const safeBizUrl = businessUrl ? escapeHtml(businessUrl) : ''
+  const subject = `We've reserved a Member Market listing for ${safeBizName}`
+
+  const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="format-detection" content="telephone=no, date=no, address=no, email=no" />
+  <meta name="color-scheme" content="light" />
+  <meta name="supported-color-schemes" content="light" />
+  <title>${safeBizName} — Member Market listing reserved</title>
+  <!--[if mso]>
+  <xml><o:OfficeDocumentSettings><o:AllowPNG/><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml>
+  <![endif]-->
+  <style type="text/css">
+    body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}
+    table,td{mso-table-lspace:0pt;mso-table-rspace:0pt}
+    img{-ms-interpolation-mode:bicubic;border:0;outline:none;text-decoration:none}
+    body{margin:0!important;padding:0!important;width:100%!important}
+    @media screen and (max-width:600px){
+      .email-card{width:100%!important;border-radius:0!important}
+      .email-body{padding:28px 24px!important}
+      .email-footer{padding:18px 24px!important}
+      .email-header{padding:20px 24px!important}
+      .feature-grid-cell{display:block!important;width:100%!important}
+      .feature-grid-spacer{display:none!important}
+      h2.headline{font-size:22px!important;line-height:30px!important}
+      .cta-btn{display:block!important;text-align:center!important}
+    }
+  </style>
+</head>
+<body style="margin:0;padding:0;background-color:#EDE9E3;font-family:Arial,Helvetica,sans-serif;">
+  <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">Your EO member listing is live and waiting — claim it to get found by fellow entrepreneurs.&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
+  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color:#EDE9E3;">
+    <tr><td align="center" style="padding:32px 16px;">
+      <table role="presentation" class="email-card" border="0" cellpadding="0" cellspacing="0" width="580" style="max-width:580px;width:100%;background-color:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 2px 20px rgba(0,0,0,0.09);">
+
+        <!-- HEADER -->
+        <tr>
+          <td class="email-header" style="background-color:#0A5C46;padding:22px 36px;">
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+              <tr>
+                <td style="vertical-align:middle;">
+                  <span style="font-family:Georgia,'Times New Roman',serif;font-size:19px;font-weight:normal;color:#ffffff;vertical-align:middle;letter-spacing:-0.3px;">Member Market</span>
+                </td>
+                <td align="right" style="vertical-align:middle;">
+                  <span style="font-family:Arial,Helvetica,sans-serif;font-size:10px;font-weight:bold;color:rgba(255,255,255,0.8);text-transform:uppercase;letter-spacing:0.08em;background-color:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);padding:5px 11px;border-radius:20px;white-space:nowrap;">EO Members Only</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- BODY -->
+        <tr>
+          <td class="email-body" style="padding:36px;">
+            <h2 class="headline" style="font-family:Georgia,'Times New Roman',serif;font-size:26px;font-weight:normal;color:#111111;line-height:1.2;margin:0 0 18px 0;">We've created a listing<br />for your business.</h2>
+            <p style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#333333;line-height:1.75;margin:0 0 14px 0;">Hi ${safeName},</p>
+            <p style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#333333;line-height:1.75;margin:0 0 14px 0;"><strong style="color:#111111;">Member Market is a private, verified business directory built exclusively for EO members, by EO members</strong> — a place to be found by fellow entrepreneurs who need what you offer, and to find businesses you can trust when you need them.</p>
+            <p style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#333333;line-height:1.75;margin:0 0 14px 0;">It's also an ideal home for your needs and leads, curated by our AI concierge.</p>
+            <p style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#333333;line-height:1.75;margin:0 0 20px 0;">We've identified you as an EO member and created a listing for <strong style="color:#111111;">${safeBizName}</strong>. It's live now — but it's waiting for you to claim it, verify your membership, and make it your own.</p>
+
+            <!-- LISTING CARD -->
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="border:1.5px solid #E2E2E2;border-radius:10px;overflow:hidden;margin:0 0 22px 0;">
+              <tr>
+                <td style="background-color:#0A5C46;padding:10px 18px;">
+                  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+                    <tr>
+                      <td style="font-family:Arial,Helvetica,sans-serif;font-size:10px;color:rgba(255,255,255,0.65);font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">Your listing on Member Market</td>
+                      <td align="right" style="font-family:Arial,Helvetica,sans-serif;font-size:10px;color:rgba(255,255,255,0.9);font-weight:bold;">&#9679;&nbsp;Awaiting claim</td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:18px;background-color:#ffffff;">
+                  <p style="font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:bold;color:#111111;margin:0 0 4px 0;">${safeBizName}</p>
+                  ${safeBizUrl ? `<p style="font-family:'Courier New',Courier,monospace;font-size:11px;color:#888888;margin:0 0 14px 0;">${safeBizUrl}</p>` : ''}
+                  <span style="display:inline-block;font-family:Arial,Helvetica,sans-serif;font-size:10px;font-weight:bold;color:#B86800;background-color:#FFFBF0;border:1px solid #E8C98A;padding:4px 10px;border-radius:20px;">&#9203; Unverified</span>
+                </td>
+              </tr>
+              <tr>
+                <td style="background-color:#FAFAFA;border-top:1px solid #E2E2E2;padding:10px 18px;">
+                  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+                    <tr>
+                      <td style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#888888;">Edit everything once you've claimed it</td>
+                      <td align="right" style="font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:bold;color:#0A5C46;">${daysLeft} days to claim</td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+
+            <!-- PRIMARY CTA -->
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 20px 0;">
+              <tr>
+                <td>
+                  <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${claimUrl}" style="height:48px;v-text-anchor:middle;width:200px;" arcsize="17%" strokecolor="#0A5C46" fillcolor="#0A5C46"><w:anchorlock/><center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;">Claim your listing &rarr;</center></v:roundrect><![endif]-->
+                  <!--[if !mso]><!-->
+                  <a class="cta-btn" href="${claimUrl}" style="display:inline-block;background-color:#0A5C46;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;text-decoration:none;padding:14px 28px;border-radius:8px;letter-spacing:-0.1px;mso-hide:all;">Claim your listing &rarr;</a>
+                  <!--<![endif]-->
+                  <p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#888888;margin:8px 0 0 0;">Takes less than 5 minutes &nbsp;&middot;&nbsp; member.market</p>
+                </td>
+              </tr>
+            </table>
+
+            <!-- FOUNDER QUOTE -->
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color:#F4F8F6;border-radius:10px;margin:24px 0;">
+              <tr>
+                <td style="padding:22px 24px;">
+                  <p style="font-family:Georgia,'Times New Roman',serif;font-size:48px;color:#0A5C46;opacity:0.25;line-height:1;margin:0 0 -8px 0;">&ldquo;</p>
+                  <p style="font-family:Georgia,'Times New Roman',serif;font-size:14px;font-style:italic;color:#222222;line-height:1.65;margin:0 0 16px 0;">More than once I've had a business need and done what we all do. Checked the EO directory. Posted in the WhatsApp needs and leads group. Waited. The directory didn't have what I needed. My post was buried in an hour. What frustrated me most wasn't the silence — it was knowing the right person was already in the network. Someone I'd trust. Someone who gets it. And still not being able to find them. Member Market is my attempt to fix that.</p>
+                  <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td style="vertical-align:middle;padding-right:10px;"><div style="width:36px;height:36px;background-color:#0A5C46;border-radius:50%;text-align:center;line-height:36px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;color:#ffffff;display:inline-block;">AH</div></td>
+                      <td style="vertical-align:middle;">
+                        <p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;color:#111111;margin:0 0 2px 0;">Andrew Herbert</p>
+                        <p style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#888888;margin:0;">EO Queensland &nbsp;&middot;&nbsp; Founder, Member Market</p>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin:24px 0;"><tr><td style="border-top:1px solid #E2E2E2;font-size:0;line-height:0;">&nbsp;</td></tr></table>
+
+            <!-- HOW IT WORKS -->
+            <p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;color:#111111;margin:0 0 16px 0;">How it works</p>
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 16px 0;">
+              <tr>
+                <td style="vertical-align:top;width:28px;padding-right:14px;padding-top:1px;"><div style="width:28px;height:28px;background-color:#0A5C46;border-radius:50%;text-align:center;line-height:28px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;color:#ffffff;display:inline-block;">1</div></td>
+                <td style="vertical-align:top;"><p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;color:#111111;margin:0 0 3px 0;">Claim your listing</p><p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#555555;line-height:1.55;margin:0;">Click above, create your account, and take ownership of the profile we've created for you. Edit anything — your services are blank and ready for you to add.</p></td>
+              </tr>
+            </table>
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 16px 0;">
+              <tr>
+                <td style="vertical-align:top;width:28px;padding-right:14px;padding-top:1px;"><div style="width:28px;height:28px;background-color:#0A5C46;border-radius:50%;text-align:center;line-height:28px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;color:#ffffff;display:inline-block;">2</div></td>
+                <td style="vertical-align:top;"><p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;color:#111111;margin:0 0 3px 0;">Verify your EO status</p><p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#555555;line-height:1.55;margin:0;">Select your membership — current EO member, EO Accelerator, or EO alumni. We'll walk you through the short verification process. Once verified, your listing moves to the top of search results for your services and region.</p></td>
+              </tr>
+            </table>
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 20px 0;">
+              <tr>
+                <td style="vertical-align:top;width:28px;padding-right:14px;padding-top:1px;"><div style="width:28px;height:28px;background-color:#0A5C46;border-radius:50%;text-align:center;line-height:28px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;color:#ffffff;display:inline-block;">3</div></td>
+                <td style="vertical-align:top;"><p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;color:#111111;margin:0 0 3px 0;">Start getting found — and finding others</p><p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#555555;line-height:1.55;margin:0;">EO members searching for your services will find your listing. When you post a need to the Needs &amp; Leads board, our AI concierge matches it to the right businesses and surfaces relevant past responses from the network — instantly.</p></td>
+              </tr>
+            </table>
+
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin:24px 0;"><tr><td style="border-top:1px solid #E2E2E2;font-size:0;line-height:0;">&nbsp;</td></tr></table>
+
+            <!-- FEATURES GRID -->
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 20px 0;">
+              <tr>
+                <td class="feature-grid-cell" style="vertical-align:top;width:48%;background-color:#F8F7F4;border-radius:8px;padding:14px;"><p style="font-size:18px;margin:0 0 7px 0;">&#128274;</p><p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;color:#111111;margin:0 0 3px 0;">EO members only</p><p style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#666666;line-height:1.5;margin:0;">Every listing is verified. Only current members and verified alumni can access the directory.</p></td>
+                <td class="feature-grid-spacer" style="width:4%;">&nbsp;</td>
+                <td class="feature-grid-cell" style="vertical-align:top;width:48%;background-color:#F8F7F4;border-radius:8px;padding:14px;"><p style="font-size:18px;margin:0 0 7px 0;">&#129302;</p><p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;color:#111111;margin:0 0 3px 0;">AI Needs &amp; Leads concierge</p><p style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#666666;line-height:1.5;margin:0;">Post a business need and the AI automatically matches and notifies the right businesses — and surfaces similar past responses from the network.</p></td>
+              </tr>
+              <tr><td colspan="3" style="padding-top:10px;"></td></tr>
+              <tr>
+                <td class="feature-grid-cell" style="vertical-align:top;width:48%;background-color:#F8F7F4;border-radius:8px;padding:14px;"><p style="font-size:18px;margin:0 0 7px 0;">&#129309;</p><p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;color:#111111;margin:0 0 3px 0;">Member endorsements</p><p style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#666666;line-height:1.5;margin:0;">"I've worked with this business" endorsements from fellow EO members boost your search ranking over time.</p></td>
+                <td class="feature-grid-spacer" style="width:4%;">&nbsp;</td>
+                <td class="feature-grid-cell" style="vertical-align:top;width:48%;background-color:#F8F7F4;border-radius:8px;padding:14px;"><p style="font-size:18px;margin:0 0 7px 0;">&#128203;</p><p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;color:#111111;margin:0 0 3px 0;">Community Asks</p><p style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#666666;line-height:1.5;margin:0;">Post personal needs — finding a specialist abroad, a trusted contact in a new market — to the broader EO network.</p></td>
+              </tr>
+            </table>
+
+            <!-- NON-SOL BOX -->
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin:20px 0;border-left:3px solid #0A5C46;border-radius:0 8px 8px 0;background-color:#F8F7F4;">
+              <tr><td style="padding:13px 16px;"><p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#444444;line-height:1.65;margin:0;"><strong style="color:#111111;">How Member Market stays EO:</strong> This is a discovery platform, not a sales channel. Members search for you and choose to reach out — you never cold-contact them. Every interaction is buyer-initiated, consistent with EO's non-solicitation principles.</p></td></tr>
+            </table>
+
+            <p style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#333333;line-height:1.75;margin:0 0 20px 0;">Your listing will remain live for <strong style="color:#111111;">${daysLeft} days</strong> while you decide whether to claim it. Claim it now and it's yours indefinitely — no charge, no catch.</p>
+
+            <!-- SECONDARY CTA -->
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="margin:0 0 4px 0;">
+              <tr>
+                <td>
+                  <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${claimUrl}" style="height:48px;v-text-anchor:middle;width:200px;" arcsize="17%" strokecolor="#0A5C46" fillcolor="#0A5C46"><w:anchorlock/><center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;">Claim your listing &rarr;</center></v:roundrect><![endif]-->
+                  <!--[if !mso]><!-->
+                  <a class="cta-btn" href="${claimUrl}" style="display:inline-block;background-color:#0A5C46;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;text-decoration:none;padding:14px 28px;border-radius:8px;mso-hide:all;">Claim your listing &rarr;</a>
+                  <!--<![endif]-->
+                </td>
+              </tr>
+            </table>
+            <p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#888888;margin:8px 0 0 0;">member.market &nbsp;&middot;&nbsp; Private &nbsp;&middot;&nbsp; EO members only</p>
+          </td>
+        </tr>
+
+        <!-- FOOTER -->
+        <tr>
+          <td class="email-footer" style="background-color:#F4F3F0;padding:20px 36px;border-top:1px solid #E2E2E2;">
+            <p style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#888888;line-height:1.7;margin:0 0 4px 0;">You received this because you've been identified as an EO member. Member Market is a member-led initiative — not an official EO Global product.</p>
+            ${removeUrl ? `<p style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#888888;line-height:1.7;margin:0 0 6px 0;">If you'd prefer not to be listed, <a href="${removeUrl}" style="color:#888888;text-decoration:underline;">remove your listing here</a> and you won't hear from us again.</p>` : ''}
+            <p style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#888888;margin:0;">Member Market &nbsp;&middot;&nbsp; <a href="https://member.market" style="color:#888888;text-decoration:underline;">member.market</a></p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`
+
+  return { subject, html }
 }
 
 /**

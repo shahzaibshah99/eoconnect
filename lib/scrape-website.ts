@@ -67,6 +67,21 @@ function extractMeta(html: string, ...patterns: RegExp[]): string | null {
   return null
 }
 
+// Returns true when the scraped description looks like a third-party directory
+// profile page (e.g. "Nick Clift is a profile on Tenassia") rather than the
+// actual business website. Callers should discard name/description/tagline.
+function isDirectoryPageContent(description: string | null): boolean {
+  if (!description) return false
+  return [
+    /is a (business |company )?profile (on|for|at)\b/i,
+    /directs users to (the )?website/i,
+    /\blisting (on|for|at) \S+\.(com|org|net|io)/i,
+    /\b(business|company|member) directory\b/i,
+    /\bonline presence\b/i,
+    /\bprofile (page|listing)\b/i,
+  ].some(p => p.test(description))
+}
+
 export async function scrapeWebsiteBasics(url: string): Promise<ScrapeResult> {
   const result: ScrapeResult = {
     name: null, tagline: null, description: null,
@@ -219,6 +234,15 @@ export async function scrapeWebsiteBasics(url: string): Promise<ScrapeResult> {
           }
         }
       }
+    }
+
+    // If the page looks like a third-party directory profile rather than
+    // the actual business site, discard the text content so we don't
+    // store "Nick Clift is a profile on Tenassia" as a real description.
+    if (isDirectoryPageContent(result.description)) {
+      result.name = null
+      result.tagline = null
+      result.description = null
     }
 
   } catch {

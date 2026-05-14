@@ -320,7 +320,7 @@ export async function initiateProfileTransfer(input: unknown): Promise<{ error: 
   if (updateErr) return { error: updateErr.message }
 
   const claimUrl = `${siteUrl()}/claim/${claim_token}`
-  const tpl = claimReminderEmail('there', biz.name, 60, claimUrl)
+  const tpl = claimReminderEmail({ name: 'there', businessName: biz.name, daysLeft: 60, claimUrl })
   await sendEmail({ to: parsed.data.recipient_email, subject: tpl.subject, html: tpl.html }).catch(err => {
     console.error('[chapter-manager] transfer claim email failed:', err)
   })
