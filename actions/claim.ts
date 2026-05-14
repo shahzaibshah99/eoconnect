@@ -66,6 +66,7 @@ export async function _createPrePopulatedListing(
   if (!parsed.success) return { error: parsed.error.issues[0].message }
 
   const claim_token = generateClaimToken()
+  const removal_token = generateClaimToken()
   // 60-day claim window per scope. Token expires at the same time;
   // the listing stays live (per spec) but no further claims accepted.
   const expires_at = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString()
@@ -95,6 +96,7 @@ export async function _createPrePopulatedListing(
       claim_token_expires_at: expires_at,
       claim_email_sent_at: null,
       claim_email_count: 0,
+      removal_token,
     })
     .select('id')
     .maybeSingle() as { data: { id: string } | null; error: { message: string } | null }
@@ -119,17 +121,32 @@ export async function _sendClaimEmail(
 ): Promise<{ error: string | null }> {
   const { data: biz } = await svc
     .from('businesses')
-    .select('id, name, email, claim_token, claim_email_count')
+    .select('id, name, email, website, claim_token, claim_email_count, removal_token')
     .eq('id', businessId)
-    .maybeSingle() as { data: { id: string; name: string; email: string | null; claim_token: string | null; claim_email_count: number } | null }
+    .maybeSingle() as { data: { id: string; name: string; email: string | null; website: string | null; claim_token: string | null; claim_email_count: number; removal_token: string | null } | null }
   if (!biz) return { error: 'Business not found' }
   if (!biz.email) return { error: 'Business has no email on file' }
   if (!biz.claim_token) return { error: 'Business has no claim token' }
 
+  // Lazy-generate removal_token for listings created before migration 036.
+  let removalToken = biz.removal_token
+  if (!removalToken) {
+    removalToken = randomBytes(32).toString('hex')
+    await svc.from('businesses').update({ removal_token: removalToken }).eq('id', businessId)
+  }
+
   const claimUrl = `${siteUrl()}/claim/${biz.claim_token}`
+  const removeUrl = `${siteUrl()}/unsubscribe/listing/${removalToken}`
   // Use the recipient's first name if provided, otherwise 'there'
   const firstName = recipientName?.split(' ')[0]?.trim() || 'there'
-  const tpl = claimReminderEmail(firstName, biz.name, 60, claimUrl)
+  const tpl = claimReminderEmail({
+    name: firstName,
+    businessName: biz.name,
+    businessUrl: biz.website ?? null,
+    daysLeft: 60,
+    claimUrl,
+    removeUrl,
+  })
   const result = await sendEmail({ to: biz.email, subject: tpl.subject, html: tpl.html })
   if (!result.ok) return { error: result.error ?? 'Email send failed' }
 

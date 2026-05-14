@@ -303,7 +303,19 @@ export async function markCsvImportProcessed(id: string): Promise<{
       : null
 
     // Step 3: AI generates tags + polished description from all data
-    const businessName = r.business_name?.trim() || webScraped?.name || linkedIn?.name || r.full_name
+    //
+    // Guard: if the scraped name matches the person's name exactly it
+    // means we hit a directory profile page (e.g. "Nick Clift is a profile
+    // on Tenassia") rather than the actual business site. Discard it and
+    // prefer LinkedIn name or fall back to the person's name only as a
+    // last resort.
+    const scrapedName = webScraped?.name
+    const scrapedNameIsPersonName = !!scrapedName &&
+      scrapedName.toLowerCase().trim() === r.full_name.toLowerCase().trim()
+    const businessName = r.business_name?.trim() ||
+      (!scrapedNameIsPersonName ? scrapedName : null) ||
+      linkedIn?.name ||
+      r.full_name
     const rawDesc = linkedIn?.description || webScraped?.description || null
     const aiData = await generateBusinessTags({
       name: businessName,

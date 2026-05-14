@@ -48,9 +48,15 @@ export async function generateBusinessTags(input: {
       prompt: `You generate business listing data for a B2B marketplace for EO (Entrepreneurs' Organization) members.
 
 Given the business details below, return:
-- "tagline": a SHORT punchy phrase (max 8 words) that captures what the business does. Must NOT repeat the description. Think: "Practical AI for business" or "Women-only fitness clubs across Australia". No full sentences.
-- "description": a clean 2-3 sentence description in third person. Different wording from the tagline. Max 250 characters. Only use provided info — do not invent facts.
-- "tags": 5-10 short keyword tags (max 4 words each). Examples: "AI Consulting", "Legal Services", "Fitness Training"
+- "tagline": a SHORT punchy phrase (max 8 words) that captures what the business DOES or OFFERS. Must NOT repeat the description. Examples: "Practical AI for business", "Women-only fitness clubs across Australia", "Business coaching for leadership teams". No full stops.
+- "description": a clean 2-3 sentence description in third person describing the business's services and value. Different wording from the tagline. Max 250 characters. Only use provided info — do not invent facts. If the source text looks like a directory profile about a person (e.g. "X is a profile on Y"), ignore it and write a generic description based on the business name and website alone.
+- "tags": 5-10 short keyword tags describing the business's SERVICES, INDUSTRY, or EXPERTISE (max 4 words each).
+
+STRICT RULES for tags:
+- Tags must describe what the business DOES — its services, industry, or expertise
+- Good examples: "Business Coaching", "EOS Implementation", "Leadership Development", "Legal Services", "AI Consulting"
+- NEVER use: person names, website descriptions, platform names, or structural words like "Profile Listing", "Business Directory", "Website Link", "Online Presence", "Directory", "Listing"
+- NEVER use the business name or person's name as a tag
 
 Business details:
 ${context}`,

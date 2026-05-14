@@ -246,7 +246,7 @@ async function runClaimStage(opts: {
       ? `${siteUrl()}/claim/${b.claim_token}`
       : `${siteUrl()}/dashboard/verify`
 
-    const tpl = claimReminderEmail(owner.full_name ?? 'there', b.name, daysLeft, claimUrl)
+    const tpl = claimReminderEmail({ name: owner.full_name ?? 'there', businessName: b.name, daysLeft, claimUrl })
     const res = await sendEmail({ to: owner.eo_membership_email, subject: tpl.subject, html: tpl.html })
     if (!res.ok) {
       console.error(`[verification-reminders] claim send to ${owner.eo_membership_email} failed:`, res.error)
