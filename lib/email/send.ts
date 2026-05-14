@@ -636,8 +636,7 @@ export function claimReminderEmail(input: {
                     <tr>
                       <td style="vertical-align:middle;padding-right:10px;"><div style="width:36px;height:36px;background-color:#0A5C46;border-radius:50%;text-align:center;line-height:36px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;color:#ffffff;display:inline-block;">AH</div></td>
                       <td style="vertical-align:middle;">
-                        <p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;color:#111111;margin:0 0 2px 0;">Andrew Herbert</p>
-                        <p style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#888888;margin:0;">EO Queensland &nbsp;&middot;&nbsp; Founder, Member Market</p>
+                        <p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;color:#111111;margin:0;">Andrew Herbert</p>
                       </td>
                     </tr>
                   </table>
