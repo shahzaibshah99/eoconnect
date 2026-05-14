@@ -277,12 +277,21 @@ function parseCsv(text: string): { error: string | null; rows: ParsedRow[]; warn
       warnings.push(`Row ${i + 1} skipped — linkedin_url is a personal profile (/in/). Use the company page URL (/company/...) instead.`)
       continue
     }
+    const rawUrl = obj.business_url?.trim() || ''
+    const businessUrl = rawUrl && !rawUrl.startsWith('http://') && !rawUrl.startsWith('https://')
+      ? `https://${rawUrl}`
+      : rawUrl
+    const rawLiUrl = obj.linkedin_url?.trim() || ''
+    const linkedinUrl = rawLiUrl && !rawLiUrl.startsWith('http://') && !rawLiUrl.startsWith('https://')
+      ? `https://${rawLiUrl}`
+      : rawLiUrl
+
     rows.push({
       email: obj.email.toLowerCase(),
       full_name: obj.full_name,
       business_name: obj.business_name || '',
-      business_url: obj.business_url || '',
-      linkedin_url: obj.linkedin_url || '',
+      business_url: businessUrl,
+      linkedin_url: linkedinUrl,
       region: obj.region || '',
       country: obj.country || '',
       city: obj.city || '',

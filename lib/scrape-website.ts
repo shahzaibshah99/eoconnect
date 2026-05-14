@@ -46,10 +46,23 @@ function makeAbsolute(src: string, base: string): string {
   return `${origin}${src.startsWith('/') ? '' : '/'}${src}`
 }
 
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .trim()
+}
+
 function extractMeta(html: string, ...patterns: RegExp[]): string | null {
   for (const pat of patterns) {
     const m = html.match(pat)
-    if (m?.[1]?.trim()) return m[1].trim()
+    if (m?.[1]?.trim()) return decodeHtmlEntities(m[1])
   }
   return null
 }
@@ -79,8 +92,10 @@ export async function scrapeWebsiteBasics(url: string): Promise<ScrapeResult> {
       /<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']{1,120})["']/i,
       /<meta[^>]+content=["']([^"']{1,120})["'][^>]+property=["']og:site_name["']/i,
     ) ?? (() => {
-      const t = html.match(/<title[^>]*>([^<]{1,200})<\/title>/i)?.[1]?.trim()
-      return t ? (t.split(/\s*[\|–—\-]\s*/)[0]?.trim() ?? t) : null
+      const raw = html.match(/<title[^>]*>([^<]{1,200})<\/title>/i)?.[1]
+      if (!raw) return null
+      const t = decodeHtmlEntities(raw)
+      return (t.split(/\s*[\|–—\-]\s*/)[0]?.trim() ?? t) || null
     })()
 
     // ── Description ───────────────────────────────────────────────
@@ -139,9 +154,14 @@ export async function scrapeWebsiteBasics(url: string): Promise<ScrapeResult> {
       /<link[^>]+href=["']([^"']{1,300})["'][^>]+rel=["'][^"']*(?:shortcut icon|icon)[^"']*["']/i,
     )
     const rawLogo = touchIcon ?? shortcutIcon
-    result.logo_url = rawLogo
-      ? makeAbsolute(rawLogo, url)
-      : `${new URL(url).origin}/favicon.ico`
+    if (rawLogo) {
+      result.logo_url = makeAbsolute(rawLogo, url)
+    } else {
+      // Google's favicon service returns a higher-res version (128px)
+      // than the raw /favicon.ico which is often 16x16
+      const domain = new URL(url).hostname
+      result.logo_url = `https://www.google.com/s2/favicons?domain=${domain}&sz=128`
+    }
 
     // ── JSON-LD structured data (Organization / LocalBusiness) ───
     const jsonLdMatches = html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)

@@ -24,16 +24,40 @@ const LANGUAGES = [
   { code: 'ru',    label: 'Русский' },
 ]
 
+function clearGoogTransCookie() {
+  const expired = 'expires=Thu, 01 Jan 1970 00:00:00 GMT'
+  const hostname = window.location.hostname
+  // Google sets the cookie on multiple domain variations — clear all of them
+  const domains = [
+    '',                           // no domain attr (current host)
+    `domain=${hostname}`,         // exact hostname
+    `domain=.${hostname}`,        // dot-prefixed (e.g. .eo.member.market)
+  ]
+  // Also try the parent domain (e.g. .member.market)
+  const parts = hostname.split('.')
+  if (parts.length > 2) {
+    domains.push(`domain=.${parts.slice(-2).join('.')}`)
+  }
+  domains.forEach(d => {
+    document.cookie = `googtrans=; path=/; ${expired}${d ? `; ${d}` : ''}`
+  })
+  // Clear from localStorage too in case Google cached it there
+  try { localStorage.removeItem('googtrans') } catch {}
+}
+
 function setLanguage(code: string) {
   if (code === 'en') {
-    document.cookie = 'googtrans=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT'
-    document.cookie = `googtrans=; path=/; domain=.${window.location.hostname}; expires=Thu, 01 Jan 1970 00:00:00 GMT`
+    clearGoogTransCookie()
+    // Use href assignment (not reload) to force a completely fresh page load
+    // without any cached translated content
+    window.location.href = window.location.pathname + window.location.search
   } else {
     const val = `/en/${code}`
+    const hostname = window.location.hostname
     document.cookie = `googtrans=${val}; path=/`
-    document.cookie = `googtrans=${val}; path=/; domain=.${window.location.hostname}`
+    document.cookie = `googtrans=${val}; path=/; domain=.${hostname}`
+    window.location.reload()
   }
-  window.location.reload()
 }
 
 export function GoogleTranslate() {

@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Upload, X, FileText, ImageIcon } from 'lucide-react'
+import { Upload, X, FileText, ImageIcon, Sparkles, Loader2 } from 'lucide-react'
 import type { Business, Category } from '@/types/database'
 import { LocationPicker } from '@/components/forms/location-picker'
 import { YearPicker } from '@/components/forms/year-picker'
@@ -22,6 +22,7 @@ import {
   formatBytes,
   validatePortfolioAddition,
 } from '@/lib/portfolio-limits'
+import { generateTagline } from '@/actions/ai-tagline'
 
 const TEAM_SIZES = ['1-10', '11-50', '51-200', '201-500', '500+'] as const
 
@@ -34,6 +35,8 @@ export function BusinessEditForm({ business, categories }: BusinessEditFormProps
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const [isGeneratingTagline, setIsGeneratingTagline] = useState(false)
+  const [taglineError, setTaglineError] = useState<string | null>(null)
   const [logoPreview, setLogoPreview] = useState<string | null>(business.logo_url ?? null)
   const [coverPreview, setCoverPreview] = useState<string | null>(business.cover_url ?? null)
   const [portfolioFiles, setPortfolioFiles] = useState<File[]>([])
@@ -66,6 +69,24 @@ export function BusinessEditForm({ business, categories }: BusinessEditFormProps
 
   const update = (key: string, value: string) =>
     setFormData(prev => ({ ...prev, [key]: value }))
+
+  const handleGenerateTagline = async () => {
+    if (!formData.name.trim() && !formData.description.trim()) {
+      setTaglineError('Add a business name or description first')
+      return
+    }
+    setIsGeneratingTagline(true)
+    setTaglineError(null)
+    const res = await generateTagline({
+      name: formData.name,
+      description: formData.description,
+      tags: formData.tags,
+      website: formData.website,
+    })
+    setIsGeneratingTagline(false)
+    if (res.error) { setTaglineError(res.error); return }
+    if (res.tagline) update('tagline', res.tagline)
+  }
 
   const toggleCategory = (id: string) => {
     setFormData(prev => ({
@@ -182,8 +203,22 @@ export function BusinessEditForm({ business, categories }: BusinessEditFormProps
           <Input id="name" name="name" value={formData.name} onChange={e => update('name', e.target.value)} required />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="tagline">Tagline</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="tagline">Tagline</Label>
+            <button
+              type="button"
+              onClick={handleGenerateTagline}
+              disabled={isGeneratingTagline}
+              className="inline-flex items-center gap-1 text-xs text-primary hover:text-primary/80 disabled:opacity-50 transition-colors"
+            >
+              {isGeneratingTagline
+                ? <><Loader2 className="h-3 w-3 animate-spin" /> Generating…</>
+                : <><Sparkles className="h-3 w-3" /> AI generate</>
+              }
+            </button>
+          </div>
           <Input id="tagline" name="tagline" value={formData.tagline} onChange={e => update('tagline', e.target.value)} placeholder="One-line description" />
+          {taglineError && <p className="text-xs text-destructive">{taglineError}</p>}
         </div>
         <div className="space-y-2">
           <Label htmlFor="description">Description</Label>

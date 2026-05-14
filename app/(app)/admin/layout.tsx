@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { Users, Tags, MessageSquareWarning, Building2, Megaphone, LayoutDashboard, ShieldCheck, History, MapPin, Upload, Flag, Star } from 'lucide-react'
+import { Users, Tags, MessageSquareWarning, Building2, Megaphone, LayoutDashboard, ShieldCheck, History, MapPin, Upload, Flag, Star, Mail, ClipboardList } from 'lucide-react'
 import { ADS_ENABLED } from '@/lib/feature-flags'
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -45,6 +45,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           </Link>
           <Link href="/admin/imports" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-muted">
             <Upload className="h-4 w-4" /> CSV imports
+          </Link>
+          <Link href="/admin/claims" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-muted">
+            <ClipboardList className="h-4 w-4" /> Claims tracker
+          </Link>
+          <Link href="/admin/email-log" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-muted">
+            <Mail className="h-4 w-4" /> Email log
           </Link>
           {isSuper && (
             <Link href="/admin/verifications" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-muted">

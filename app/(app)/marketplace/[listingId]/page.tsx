@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { MapPin, Globe, Phone, Mail, Star, Calendar, Users, FileText, ExternalLink, Handshake } from 'lucide-react'
+import { MapPin, Globe, Phone, Mail, Calendar, Users, FileText, ExternalLink, Handshake } from 'lucide-react'
 
 // Inline brand SVGs — Lucide 1.x dropped brand icons into a separate package.
 const LinkedinIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -33,8 +33,6 @@ import { FlagDialog } from '@/components/marketplace/flag-dialog'
 import { EndorsementForm } from '@/components/marketplace/endorsement-form'
 import { EndorsementDisplay } from '@/components/marketplace/endorsement-display'
 import { externalUrl } from '@/lib/external-url'
-import { ReviewForm } from '@/components/reviews/review-form'
-import { ReviewCard, type ReviewCardItem } from '@/components/reviews/review-card'
 import { BackButton } from '@/components/marketplace/back-button'
 import { cn } from '@/lib/utils'
 
@@ -55,23 +53,9 @@ export default async function ListingDetailPage({ params }: ListingDetailProps) 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any
 
-  // Reviews now pull the reviewer's profile (name, avatar, chapter,
-  // membership) AND a join to their reviewer_business + the
-  // service_id of the review's specific service. The card renders
-  // the reviewer's BUSINESS as the primary identity when available.
-  const [{ data: business }, { data: services }, { data: reviews }, { data: categories }, { data: endorsements }] = await Promise.all([
+  const [{ data: business }, { data: services }, { data: categories }, { data: endorsements }] = await Promise.all([
     db.from('businesses').select('*, profiles!owner_id(full_name, avatar_url, eo_chapter, eo_membership_type, linkedin_url)').eq('id', listingId).eq('status', 'published').single(),
     db.from('services').select('*').eq('business_id', listingId).eq('status', 'published'),
-    db.from('reviews')
-      .select(`
-        *,
-        profiles!reviewer_id(full_name, avatar_url, eo_chapter, eo_membership_type),
-        reviewer_business:businesses!reviewer_business_id(id, name, logo_url),
-        service:services!service_id(id, title)
-      `)
-      .eq('business_id', listingId)
-      .eq('flagged', false)
-      .order('created_at', { ascending: false }),
     supabase.from('categories').select('id, name').eq('active', true),
     db.from('endorsements')
       .select('id, from_member_id, text, created_at, profiles!from_member_id(full_name, avatar_url, eo_chapter, eo_membership_type)')
@@ -102,77 +86,12 @@ export default async function ListingDetailPage({ params }: ListingDetailProps) 
     }
   })
 
-  type RawReview = {
-    id: string
-    reviewer_id: string
-    rating: number
-    body: string | null
-    owner_reply: string | null
-    profiles?: {
-      full_name?: string
-      avatar_url?: string | null
-      eo_chapter?: string | null
-      eo_membership_type?: 'current_member' | 'alumni' | 'accelerator' | null
-    } | null
-    reviewer_business?: { id: string; name: string; logo_url: string | null } | null
-    service?: { id: string; title: string } | null
-  }
-  const rawReviews = (reviews ?? []) as RawReview[]
-
-  // Normalize the joined fields into the shape the ReviewCard expects.
-  const reviewList: ReviewCardItem[] = rawReviews.map(r => ({
-    id: r.id,
-    rating: r.rating,
-    body: r.body,
-    owner_reply: r.owner_reply,
-    reviewerName: r.profiles?.full_name ?? 'Member',
-    reviewerAvatar: r.profiles?.avatar_url ?? null,
-    reviewerChapter: r.profiles?.eo_chapter ?? null,
-    reviewerMembershipType: r.profiles?.eo_membership_type ?? null,
-    reviewerBusinessId: r.reviewer_business?.id ?? null,
-    reviewerBusinessName: r.reviewer_business?.name ?? null,
-    reviewerBusinessLogo: r.reviewer_business?.logo_url ?? null,
-    serviceTitle: r.service?.title ?? null,
-  }))
-
-  const avgRating = rawReviews.length
-    ? rawReviews.reduce((sum, r) => sum + r.rating, 0) / rawReviews.length
-    : null
 
   const businessCategories = (categories as Array<{ id: string; name: string }> | null)
     ?.filter(c => business.category_ids?.includes(c.id)) ?? []
 
   const isOwner = user?.id === business.owner_id
-  const myReviewRaw = user ? rawReviews.find(r => r.reviewer_id === user.id) : null
-  // Existing review the form should treat as already-submitted
-  // (drives the non-editable "you've reviewed this" card).
-  const myReviewExisting = myReviewRaw
-    ? { rating: myReviewRaw.rating, body: myReviewRaw.body }
-    : null
   const portfolioUrls = (business.portfolio_urls ?? []) as string[]
-
-  // Pull current viewer's role + their own businesses so we can:
-  //   - hand the reviewer's businesses to ReviewForm's "Reviewing as"
-  //     picker (only if they have any)
-  //   - tell ReviewCard whether to render admin edit/delete actions
-  let viewerRole: 'member' | 'chapter_admin' | 'super_admin' = 'member'
-  let reviewerBusinesses: Array<{ id: string; name: string }> = []
-  if (user) {
-    const [{ data: viewerProfile }, { data: viewerBusinesses }] = await Promise.all([
-      db.from('profiles').select('role').eq('id', user.id).single() as Promise<{
-        data: { role: 'member' | 'chapter_admin' | 'super_admin' } | null
-      }>,
-      db.from('businesses').select('id, name').eq('owner_id', user.id).order('created_at', { ascending: false }) as Promise<{
-        data: Array<{ id: string; name: string }> | null
-      }>,
-    ])
-    if (viewerProfile?.role) viewerRole = viewerProfile.role
-    reviewerBusinesses = viewerBusinesses ?? []
-  }
-  const isAdmin = viewerRole === 'chapter_admin' || viewerRole === 'super_admin'
-
-  const reviewableServices = ((services as Array<{ id: string; title: string }> | null) ?? [])
-    .map(s => ({ id: s.id, title: s.title }))
 
   return (
     <div className="max-w-5xl mx-auto space-y-8">
@@ -219,13 +138,6 @@ export default async function ListingDetailPage({ params }: ListingDetailProps) 
               <span className="flex items-center gap-1 text-sm text-muted-foreground">
                 <MapPin className="h-3.5 w-3.5" />
                 {[business.city, business.country].filter(Boolean).join(', ')}
-              </span>
-            )}
-            {avgRating !== null && (
-              <span className="flex items-center gap-1 text-sm">
-                <Star className="h-3.5 w-3.5 fill-primary text-primary" />
-                <span className="font-semibold">{avgRating.toFixed(1)}</span>
-                <span className="text-muted-foreground">({reviewList.length} reviews)</span>
               </span>
             )}
           </div>
@@ -509,39 +421,6 @@ export default async function ListingDetailPage({ params }: ListingDetailProps) 
           </div>
         </section>
       )}
-
-      {/* Reviews */}
-      <section>
-        <h2 className="text-xl font-bold mb-4">
-          Reviews{reviewList.length ? ` (${reviewList.length})` : ''}
-        </h2>
-
-        {!isOwner && user && (
-          <div className="mb-6">
-            <ReviewForm
-              businessId={business.id}
-              existing={myReviewExisting}
-              reviewerBusinesses={reviewerBusinesses}
-              services={reviewableServices}
-            />
-          </div>
-        )}
-
-        {reviewList.length > 0 ? (
-          <div className="space-y-4">
-            {reviewList.map(review => (
-              <ReviewCard
-                key={review.id}
-                review={review}
-                isListingOwner={isOwner}
-                isAdmin={isAdmin}
-              />
-            ))}
-          </div>
-        ) : (
-          <p className="text-muted-foreground text-sm">No reviews yet.</p>
-        )}
-      </section>
 
       {/* I've Worked With Endorsements */}
       <section>
