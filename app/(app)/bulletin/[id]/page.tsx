@@ -48,6 +48,18 @@ export default async function BulletinPostPage({ params }: PageProps) {
   const post = postRes.data
   const replies = repliesRes.data ?? []
 
+  // Fetch business IDs for reply authors so their name links to their listing.
+  const responderIds = [...new Set(replies.map((r: { responder_member_id: string }) => r.responder_member_id))]
+  const businessByOwner: Record<string, string> = {}
+  if (responderIds.length > 0) {
+    const { data: bizRows } = await db
+      .from('businesses')
+      .select('id, owner_id')
+      .in('owner_id', responderIds)
+      .neq('status', 'archived') as { data: Array<{ id: string; owner_id: string }> | null }
+    for (const b of bizRows ?? []) businessByOwner[b.owner_id] = b.id
+  }
+
   // F18: surface top-3 AI past referrals for this post's topic.
   // Runs server-side so it shows on first load without a client fetch.
   // Falls back to [] when OPENAI_API_KEY is missing or DB has no referrals yet.
@@ -151,6 +163,7 @@ export default async function BulletinPostPage({ params }: PageProps) {
         collapseAfter={THREAD_COLLAPSE_AFTER}
         isOwner={isOwner}
         aiReferrals={aiReferrals}
+        businessByOwner={businessByOwner}
       />
     </div>
   )
