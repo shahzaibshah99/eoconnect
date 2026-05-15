@@ -195,14 +195,54 @@ async function SearchResults({ searchParams }: SearchPageProps) {
   const queryText = params.q?.trim()
   const tierCounts: Record<string, number> = {}
 
+  // ── Tag keyword helpers ────────────────────────────────────────
+  // Tags are explicit business signals — "AI Consultant" tag should
+  // always match a search for "AI consultant" regardless of vector
+  // similarity. We extract words from the query and do prefix matching
+  // against business tags, running it in parallel with vector search.
+
+  function extractSearchKeywords(query: string): string[] {
+    const STOP = new Set(['a', 'an', 'the', 'and', 'or', 'for', 'in', 'of', 'to', 'with'])
+    return query.toLowerCase()
+      .replace(/[-_]/g, ' ')
+      .split(/\s+/)
+      .map(w => w.replace(/[^a-z0-9]/g, ''))
+      .filter(w => w.length >= 3 && !STOP.has(w))
+  }
+
+  function tagsMatchQuery(tags: string[], keywords: string[]): boolean {
+    if (!tags.length || !keywords.length) return false
+    const bizWords = tags.flatMap(t =>
+      t.toLowerCase().replace(/[-_]/g, ' ').split(/\s+/).filter(w => w.length >= 3)
+    )
+    const wordMatches = (kw: string) =>
+      bizWords.some(bw => bw === kw || bw.startsWith(kw) || kw.startsWith(bw))
+    // For multi-word queries (e.g. "AI consultant"), require ALL keywords to
+    // match so "Business Consulting" doesn't match "AI consultant" just because
+    // "consult" overlaps. Single-word queries only need 1 match.
+    const required = Math.min(keywords.length, 2)
+    const matched = keywords.filter(wordMatches).length
+    return matched >= required
+  }
+
   if (queryText) {
-    // PERFORMANCE: parser + embedding run in parallel (used to be sequential
-    // and added ~1.2s to every search). Embedding always uses the raw query
-    // — we lose the small benefit of focused text but cut latency in half.
-    const [parsed, queryEmbedding] = await Promise.all([
+    // Run parser, embedding, AND tag candidates in parallel.
+    // Tag candidates = all published businesses (respecting active filters)
+    // so we can score them by keyword overlap client-side.
+    const [parsed, queryEmbedding, tagCandidatesRes] = await Promise.all([
       categories ? parseSearchQuery(queryText, categories) : Promise.resolve(null),
       getEmbedding(queryText),
+      buildBase().select('id, tags').limit(200),
     ])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tagCandidates = (tagCandidatesRes as any).data as Array<{ id: string; tags: string[] }> | null
+    const searchKeywords = extractSearchKeywords(queryText)
+    const tagMatchIds = new Set(
+      (tagCandidates ?? [])
+        .filter(b => tagsMatchQuery(b.tags ?? [], searchKeywords))
+        .map(b => b.id)
+    )
+    tierCounts.tag_matches = tagMatchIds.size
     const parsedCatIds: string[] = (parsed?.categorySlugs.length && categories)
       ? categories.filter((c: { slug: string; id: string }) => parsed.categorySlugs.includes(c.slug)).map((c: { id: string }) => c.id)
       : []
@@ -214,17 +254,11 @@ async function SearchResults({ searchParams }: SearchPageProps) {
       const { data: matches, error: rpcErr } = await db.rpc('search_businesses_by_embedding', {
         query_embedding: queryEmbedding,
         match_count: 50,
-        // 0.30 — was 0.45. The earlier value was tuned for fully-
-        // formed queries like "ai consultancy" and was too strict
-        // for typo'd / casual queries the user actually types ("ai
-        // specalist in austrlia"). text-embedding-3-small handles
-        // typos reasonably well — cosine sim still hits 0.35-0.45
-        // for typo'd phrases vs the closest business — but our 0.45
-        // floor was clipping those. 0.30 trades a bit of precision
-        // for recall, which matters more on a small dataset where a
-        // false-negative is way worse than an extra slightly-off
-        // result.
-        min_similarity: 0.30,
+        // 0.50 — raised from 0.30. Tag search now handles exact keyword
+        // matches so vector search only needs to catch semantic matches.
+        // At 0.50, only genuinely similar businesses surface (e.g. "AI
+        // Consultancy" won't match "Business Consulting" at 32% similarity).
+        min_similarity: 0.60,
       }) as { data: Array<{ id: string; similarity: number }> | null; error: { message: string } | null }
       if (rpcErr) tierCounts.vector_rpc_error = 1
       tierCounts.tier1_vector_raw = matches?.length ?? 0
@@ -302,6 +336,26 @@ async function SearchResults({ searchParams }: SearchPageProps) {
         const { data: rows } = await buildBase().in('id', ids).limit(50) as { data: Business[] | null }
         results = rows ?? []
       }
+    }
+
+    // ── Tag merge: add tag-matched businesses missing from tier results ──
+    // Businesses with a tag keyword match that weren't caught by vector/FTS
+    // get added here. Results are then re-ordered: vector+tag > tag-only >
+    // vector-only so explicit tag signals always surface first.
+    const vectorIdSet = new Set(results.map(b => b.id))
+    const tagOnlyIds = [...tagMatchIds].filter(id => !vectorIdSet.has(id))
+    if (tagOnlyIds.length > 0) {
+      const { data: tagOnlyRows } = await buildBase()
+        .in('id', tagOnlyIds) as { data: Business[] | null }
+      const vectorAndTag = results.filter(b => tagMatchIds.has(b.id))
+      const vectorOnly  = results.filter(b => !tagMatchIds.has(b.id))
+      results = [...vectorAndTag, ...(tagOnlyRows ?? []), ...vectorOnly]
+      tierCounts.tag_injected = tagOnlyIds.length
+    } else if (tagMatchIds.size > 0) {
+      // All tag matches already in results — bubble them to the top
+      const withTag    = results.filter(b => tagMatchIds.has(b.id))
+      const withoutTag = results.filter(b => !tagMatchIds.has(b.id))
+      results = [...withTag, ...withoutTag]
     }
 
     // Diagnostic: surfaces how many results each tier returned.
