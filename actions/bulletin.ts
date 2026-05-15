@@ -181,6 +181,7 @@ export async function submitBulletinPost(input: unknown): Promise<{
     matched = await matchAndNotify({
       postId: post.id,
       tags: parsed.data.tags ?? [],
+      detail: parsed.data.detail ?? '',
       country: parsed.data.geography_country,
       city: parsed.data.geography_city ?? null,
       postTitle: parsed.data.title,
@@ -210,9 +211,44 @@ export async function submitBulletinPost(input: unknown): Promise<{
 
 // ── Matching engine ────────────────────────────────────────────
 
+// Extract meaningful lowercase words from tags or free text.
+// Splits on hyphens, underscores, spaces; drops stopwords and tokens < 3 chars.
+function extractKeywords(texts: string[]): Set<string> {
+  const STOP = new Set(['a', 'an', 'the', 'and', 'or', 'for', 'in', 'of', 'to', 'with', 'by', 'at', 'on', 'is', 'are', 'be', 'as', 'we', 'our', 'your'])
+  const words = new Set<string>()
+  for (const text of texts) {
+    text.toLowerCase()
+      .replace(/[-_/]/g, ' ')
+      .split(/\s+/)
+      .forEach(w => {
+        const clean = w.replace(/[^a-z0-9]/g, '')
+        if (clean.length >= 3 && !STOP.has(clean)) words.add(clean)
+      })
+  }
+  return words
+}
+
+// Score how well a business's tags match the need keywords.
+// Uses prefix matching so "consult" matches "consulting", "consultant" etc.
+function scoreTagMatch(bizTags: string[], needKeywords: Set<string>): number {
+  if (!bizTags.length || !needKeywords.size) return 0
+  const bizWords = extractKeywords(bizTags)
+  let score = 0
+  for (const needWord of needKeywords) {
+    for (const bizWord of bizWords) {
+      if (bizWord === needWord || bizWord.startsWith(needWord) || needWord.startsWith(bizWord)) {
+        score++
+        break
+      }
+    }
+  }
+  return score
+}
+
 async function matchAndNotify(input: {
   postId: string
   tags: string[]
+  detail?: string
   country: string
   city: string | null
   postTitle: string
@@ -222,33 +258,46 @@ async function matchAndNotify(input: {
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return []
   const svc = adminDb()
 
-  // Find published businesses whose tags overlap with the post tags.
-  // Use service-role to bypass RLS — we're doing a platform-wide match.
   type BizRow = {
-    id: string; name: string; owner_id: string; verification_tag: string | null;
-    created_at: string; country: string | null;
+    id: string; name: string; owner_id: string; tags: string[];
+    verification_tag: string | null; created_at: string; country: string | null;
     profiles: { eo_membership_email: string | null; full_name: string | null } | null
   }
 
+  // Fetch all published non-slow-replier businesses in the same country.
+  // We score them in JS so tag format differences (kebab, Title Case, etc.)
+  // don't prevent a match.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: candidates } = await (svc as any)
     .from('businesses')
-    .select('id, name, owner_id, verification_tag, created_at, country, profiles!owner_id(eo_membership_email, full_name)')
+    .select('id, name, owner_id, tags, verification_tag, created_at, country, profiles!owner_id(eo_membership_email, full_name)')
     .eq('status', 'published')
     .eq('slow_replier', false)
-    .overlaps('tags', input.tags.length > 0 ? input.tags : ['__no_match__'])
+    .not('owner_id', 'is', null)
     .ilike('country', input.country)
-    .limit(50) as { data: BizRow[] | null }
+    .limit(200) as { data: BizRow[] | null }
 
   if (!candidates || candidates.length === 0) return []
 
-  // Sort by verification tier then recency. Slice to 6.
-  const sorted = [...candidates].sort((a, b) => {
-    const aTier = VERIFICATION_TIER[a.verification_tag ?? 'unverified'] ?? 99
-    const bTier = VERIFICATION_TIER[b.verification_tag ?? 'unverified'] ?? 99
-    if (aTier !== bTier) return aTier - bTier
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  }).slice(0, 6)
+  // Build keyword set from need tags + description for richer matching.
+  const needKeywords = extractKeywords([...input.tags, input.detail ?? ''])
+
+  // Score each business by word-level overlap with its tags.
+  // Sort: score DESC → verification tier → recency. Keep top 6.
+  const scored = candidates
+    .map(biz => ({ biz, score: scoreTagMatch(biz.tags ?? [], needKeywords) }))
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score
+      const aTier = VERIFICATION_TIER[a.biz.verification_tag ?? 'unverified'] ?? 99
+      const bTier = VERIFICATION_TIER[b.biz.verification_tag ?? 'unverified'] ?? 99
+      if (aTier !== bTier) return aTier - bTier
+      return new Date(b.biz.created_at).getTime() - new Date(a.biz.created_at).getTime()
+    })
+
+  const sorted = scored.slice(0, 6).map(({ biz }) => biz)
+
+  if (sorted.length === 0) return []
 
   const postUrl = `${input.siteUrl}/bulletin/${input.postId}`
 
