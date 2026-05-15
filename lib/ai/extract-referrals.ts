@@ -41,7 +41,7 @@ export async function extractReferralsFromReply(
   try {
     const result = await Promise.race([
       generateText({
-        model: openai('gpt-4o-mini'),
+        model: openai('gpt-5-nano'),
         output: Output.object({ schema: ExtractedReferralSchema }),
         prompt: `You extract referrals from member-to-member replies in a business network.
 

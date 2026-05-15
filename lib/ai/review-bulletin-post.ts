@@ -66,7 +66,7 @@ export async function reviewBulletinPost(input: {
   try {
     const result = await Promise.race([
       generateText({
-        model: openai('gpt-4o-mini'),
+        model: openai('gpt-5-nano'),
         output: Output.object({ schema: ReviewSchema }),
         prompt: `You review posts for a peer-to-peer member marketplace used by EO and YPO entrepreneurs.
 
