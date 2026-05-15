@@ -39,11 +39,10 @@ export async function extractReferralsFromReply(
   if (!replyText?.trim()) return []
 
   try {
-    const result = await Promise.race([
-      generateText({
-        model: openai('gpt-5-nano'),
-        output: Output.object({ schema: ExtractedReferralSchema }),
-        prompt: `You extract referrals from member-to-member replies in a business network.
+    const result = await generateText({
+      model: openai('gpt-5-nano'),
+      output: Output.object({ schema: ExtractedReferralSchema }),
+      prompt: `You extract referrals from member-to-member replies in a business network.
 
 Reply text:
 """
@@ -70,13 +69,9 @@ For each referral found:
 - full_text: the exact sentence(s) containing the referral
 
 Be conservative. Only extract explicit named recommendations. Return empty array if none.`,
-      }).then(r => r.output),
-      new Promise<null>((_, reject) =>
-        setTimeout(() => reject(new Error('extraction timeout')), 10000)
-      ),
-    ])
+    })
 
-    return result?.referrals ?? []
+    return result.output?.referrals ?? []
   } catch (err) {
     console.error('[referral-extract] failed:', err instanceof Error ? err.message : err)
     return []

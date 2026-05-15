@@ -44,7 +44,7 @@ const ReviewSchema = z.object({
  * a concise title, extracts matching tags, and flags if more detail
  * is needed. Called when the member clicks "Next → AI review".
  *
- * Returns in ≤8s; falls back gracefully on timeout or missing key.
+ * Falls back gracefully on error or missing key.
  */
 export async function reviewBulletinPost(input: {
   detail: string
@@ -64,11 +64,10 @@ export async function reviewBulletinPost(input: {
   }
 
   try {
-    const result = await Promise.race([
-      generateText({
-        model: openai('gpt-5-nano'),
-        output: Output.object({ schema: ReviewSchema }),
-        prompt: `You review posts for a peer-to-peer member marketplace used by EO and YPO entrepreneurs.
+    const result = await generateText({
+      model: openai('gpt-5-nano'),
+      output: Output.object({ schema: ReviewSchema }),
+      prompt: `You review posts for a peer-to-peer member marketplace used by EO and YPO entrepreneurs.
 
 The member has described what they need:
 ---
@@ -84,13 +83,9 @@ Your tasks:
 4. If NOT specific enough, one concrete suggestion (max 100 chars). Null if fine.
 
 Be concise — business owners need enough context to judge if they're a fit.`,
-      }).then(r => r.output),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('AI review timeout')), 8000)
-      ),
-    ])
+    })
 
-    return result ?? FALLBACK
+    return result.output ?? FALLBACK
   } catch (err) {
     console.error('[bulletin-review] AI review failed:', err)
     return FALLBACK
