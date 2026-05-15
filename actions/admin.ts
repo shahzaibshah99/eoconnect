@@ -541,7 +541,12 @@ export async function transferBusinessOwnership(
 
   const { error } = await svc
     .from('businesses')
-    .update({ owner_id: newOwnerId })
+    .update({
+      owner_id: newOwnerId,
+      claimed_at: new Date().toISOString(),
+      claim_token: null,
+      claim_token_expires_at: null,
+    })
     .eq('id', businessId)
   if (error) return { error: error.message }
   await logEvent(svc, 'business_ownership_transferred', ctx.user!.id, businessId, {
