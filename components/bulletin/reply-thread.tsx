@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { formatDistanceToNow, format } from 'date-fns'
+import Link from 'next/link'
 import { MessageSquare, ChevronDown, Sparkles } from 'lucide-react'
 import type { ReferralSearchResult } from '@/lib/ai/referral-search'
 
@@ -29,10 +30,10 @@ interface ReplyThreadProps {
   replies: Reply[]
   currentUserId: string | null
   isClosed: boolean
-  /** F18: AI-surfaced referrals from similar past posts — shown before live replies. */
   aiReferrals?: ReferralSearchResult[]
   collapseAfter: number
   isOwner: boolean
+  businessByOwner?: Record<string, string>
 }
 
 /**
@@ -43,7 +44,7 @@ interface ReplyThreadProps {
  * - Closed when post is fulfilled or expired
  */
 export function ReplyThread({
-  postId, replies, currentUserId, isClosed, collapseAfter, isOwner: _isOwner, aiReferrals = [],
+  postId, replies, currentUserId, isClosed, collapseAfter, isOwner: _isOwner, aiReferrals = [], businessByOwner = {},
 }: ReplyThreadProps) {
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
@@ -95,6 +96,7 @@ export function ReplyThread({
               key={reply.id}
               reply={reply}
               isCurrentUser={reply.responder_member_id === currentUserId}
+              businessId={businessByOwner[reply.responder_member_id]}
             />
           ))}
 
@@ -186,18 +188,30 @@ function AiReferralCard({ referral }: { referral: ReferralSearchResult }) {
   )
 }
 
-function ReplyCard({ reply, isCurrentUser }: { reply: Reply; isCurrentUser: boolean }) {
+function ReplyCard({ reply, isCurrentUser, businessId }: { reply: Reply; isCurrentUser: boolean; businessId?: string }) {
+  const profileHref = businessId ? `/marketplace/${businessId}` : undefined
+
+  const avatarEl = (
+    <Avatar className="h-8 w-8 shrink-0 mt-0.5">
+      <AvatarImage src={reply.profiles?.avatar_url ?? undefined} />
+      <AvatarFallback className="bg-primary/15 text-primary text-xs font-bold">
+        {(reply.profiles?.full_name ?? '?').charAt(0).toUpperCase()}
+      </AvatarFallback>
+    </Avatar>
+  )
+
   return (
     <div className={`flex gap-3 p-4 rounded-xl border ${isCurrentUser ? 'bg-primary/5 border-primary/20' : 'bg-card border-border'}`}>
-      <Avatar className="h-8 w-8 shrink-0 mt-0.5">
-        <AvatarImage src={reply.profiles?.avatar_url ?? undefined} />
-        <AvatarFallback className="bg-primary/15 text-primary text-xs font-bold">
-          {(reply.profiles?.full_name ?? '?').charAt(0).toUpperCase()}
-        </AvatarFallback>
-      </Avatar>
+      {profileHref ? <Link href={profileHref}>{avatarEl}</Link> : avatarEl}
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2 flex-wrap mb-1">
-          <span className="text-sm font-medium">{reply.profiles?.full_name ?? 'Member'}</span>
+          {profileHref ? (
+            <Link href={profileHref} className="text-sm font-medium text-primary hover:underline underline-offset-2">
+              {reply.profiles?.full_name ?? 'Member'}
+            </Link>
+          ) : (
+            <span className="text-sm font-medium">{reply.profiles?.full_name ?? 'Member'}</span>
+          )}
           {reply.profiles?.eo_chapter && (
             <span className="text-[11px] text-muted-foreground">{reply.profiles.eo_chapter}</span>
           )}
