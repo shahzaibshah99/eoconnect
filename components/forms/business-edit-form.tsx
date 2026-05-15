@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Upload, X, FileText, ImageIcon, Sparkles, Loader2 } from 'lucide-react'
+import { Upload, X, FileText, ImageIcon, Sparkles, Loader2, CheckCircle2 } from 'lucide-react'
 import type { Business, Category } from '@/types/database'
 import { LocationPicker } from '@/components/forms/location-picker'
 import { YearPicker } from '@/components/forms/year-picker'
@@ -190,8 +190,11 @@ export function BusinessEditForm({ business, categories }: BusinessEditFormProps
         </Alert>
       )}
       {success && (
-        <Alert className="border-primary/50 bg-primary/10">
-          <AlertDescription className="text-primary font-medium">Business profile updated successfully.</AlertDescription>
+        <Alert className="border-green-500/50 bg-green-500/10 flex items-center gap-3 py-4">
+          <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 shrink-0" />
+          <AlertDescription className="text-green-700 dark:text-green-400 font-semibold text-base">
+            Business profile updated successfully.
+          </AlertDescription>
         </Alert>
       )}
 
