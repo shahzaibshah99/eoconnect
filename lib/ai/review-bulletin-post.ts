@@ -24,8 +24,8 @@ const ReviewSchema = z.object({
   tags: z
     .array(z.string())
     .describe(
-      '3-8 lowercase kebab-case keyword tags that capture what is being requested. ' +
-      'Good: ["legal-services", "ip-protection", "trademark", "startup", "sydney"]. ' +
+      '3-8 keyword tags (1-3 words each) that capture what is being requested. ' +
+      'Good: ["Legal Services", "IP Protection", "Sydney", "AI Consulting"]. ' +
       'Bad: ["help", "business", "need"]. Include geography as a tag if provided.'
     ),
   is_complete: z
@@ -78,7 +78,7 @@ Needed by: ${input.required_by}
 
 Your tasks:
 1. Write a clear, specific title (max 80 chars) capturing the core need.
-2. Extract 3-8 lowercase kebab-case keyword tags for matching. Include geography.
+2. Extract 3-8 keyword tags (1-3 words each) for matching against business listings. Include geography. Examples: "AI Consulting", "Legal Services", "Melbourne", "Business Automation".
 3. Decide if the description is specific enough: clear requirement, specific geography, some scope/budget/timeline context.
 4. If NOT specific enough, one concrete suggestion (max 100 chars). Null if fine.
 
