@@ -103,15 +103,30 @@ export async function scrapeWebsiteBasics(url: string): Promise<ScrapeResult> {
     const html = await res.text()
 
     // ── Business name ────────────────────────────────────────────
-    result.name = extractMeta(html,
+    // Generic page titles that are meaningless as a business name.
+    // These happen when a site's <title> is just "Home" or "Welcome"
+    // rather than the company name. Discard them so we fall back to
+    // LinkedIn name, email domain, or the person's name from the CSV.
+    const GENERIC_TITLES = new Set([
+      'home', 'homepage', 'welcome', 'index', 'default', 'untitled',
+      'page', 'website', 'site', 'main', 'start', 'loading',
+    ])
+
+    const siteName = extractMeta(html,
       /<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']{1,120})["']/i,
       /<meta[^>]+content=["']([^"']{1,120})["'][^>]+property=["']og:site_name["']/i,
-    ) ?? (() => {
+    )
+    const titleName = (() => {
       const raw = html.match(/<title[^>]*>([^<]{1,200})<\/title>/i)?.[1]
       if (!raw) return null
       const t = decodeHtmlEntities(raw)
       return (t.split(/\s*[\|–—\-]\s*/)[0]?.trim() ?? t) || null
     })()
+
+    const candidateName = siteName ?? titleName
+    result.name = (candidateName && GENERIC_TITLES.has(candidateName.toLowerCase().trim()))
+      ? null
+      : candidateName
 
     // ── Description ───────────────────────────────────────────────
     const fullDesc = extractMeta(html,

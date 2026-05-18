@@ -1,12 +1,13 @@
 'use client'
 
-import { useMemo, useRef, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   submitCsvImportAsAdmin,
   approveCsvImport,
   rejectCsvImport,
   markCsvImportProcessed,
+  processCsvBatch,
   type CsvImportRow,
 } from '@/actions/imports'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -27,6 +28,7 @@ export interface ImportRow {
   id: string
   source: Source
   row_count: number
+  processed_count: number
   status: Status
   rejection_reason: string | null
   chapter_id: number | null
@@ -126,12 +128,6 @@ function ImportRowItem({ row }: { row: ImportRow }) {
       if (res.error) {
         setProcessError(res.error)
       } else {
-        setProcessResult({
-          created: res.created ?? 0,
-          skipped: res.skipped ?? 0,
-          rowErrors: res.rowErrors ?? [],
-          emailErrors: res.emailErrors ?? [],
-        })
         router.refresh()
       }
     })
@@ -195,6 +191,14 @@ function ImportRowItem({ row }: { row: ImportRow }) {
                 <span className="font-medium">Reason:</span> {row.rejection_reason}
               </p>
             )}
+            {/* Progress bar — auto-starts when import is approved */}
+            {row.status === 'approved' && (
+              <BatchProgressBar
+                importId={row.id}
+                totalRows={row.row_count}
+                initialProcessed={row.processed_count ?? 0}
+              />
+            )}
             {/* (i) icon — shows processing result for processed imports */}
             {row.status === 'processed' && row.payload?.result && (
               <ProcessingResult result={row.payload.result} />
@@ -211,7 +215,7 @@ function ImportRowItem({ row }: { row: ImportRow }) {
             <>
               <Button size="sm" onClick={approve} disabled={isPending} className="gap-1.5">
                 <Check className="h-3.5 w-3.5" />
-                {isPending ? 'Processing…' : 'Approve & create listings'}
+                {isPending ? 'Approving…' : 'Approve'}
               </Button>
               <Button
                 size="sm"
@@ -223,12 +227,6 @@ function ImportRowItem({ row }: { row: ImportRow }) {
                 <X className="h-3.5 w-3.5" /> Reject
               </Button>
             </>
-          )}
-          {/* Fallback for imports that were approved before auto-process was added */}
-          {row.status === 'approved' && (
-            <Button size="sm" variant="outline" onClick={process} disabled={isPending} className="gap-1.5">
-              <PlayCircle className="h-3.5 w-3.5" /> Create listings & send emails
-            </Button>
           )}
         </div>
       </div>
@@ -329,6 +327,121 @@ function RejectDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// ── Batch progress bar ────────────────────────────────────────
+//
+// Shown automatically when an import moves to 'approved' status.
+// Drives batch processing client-side: calls processCsvBatch() in a loop
+// with a 50-row batch size. Survives page refresh — resumes from
+// processed_count stored in DB.
+
+const BATCH_SIZE = 50
+
+function BatchProgressBar({
+  importId,
+  totalRows,
+  initialProcessed,
+}: {
+  importId: string
+  totalRows: number
+  initialProcessed: number
+}) {
+  const router = useRouter()
+  const [processed, setProcessed] = useState(initialProcessed)
+  const [stats, setStats] = useState({ created: 0, skipped: 0, errors: 0 })
+  const [rowErrors, setRowErrors] = useState<string[]>([])
+  const [done, setDone] = useState(false)
+  const [processingError, setProcessingError] = useState<string | null>(null)
+  const [startTime] = useState(Date.now())
+  const isRunning = useRef(false)
+
+  useEffect(() => {
+    if (isRunning.current || done || processed >= totalRows) return
+    isRunning.current = true
+
+    const run = async () => {
+      let offset = initialProcessed
+      while (offset < totalRows) {
+        const res = await processCsvBatch(importId, offset, BATCH_SIZE)
+        if (res.error) { setProcessingError(res.error); break }
+        setProcessed(res.processedSoFar)
+        setStats(prev => ({
+          created: prev.created + res.batchCreated,
+          skipped: prev.skipped + res.batchSkipped,
+          errors: prev.errors + res.batchRowErrors.length,
+        }))
+        if (res.batchRowErrors.length > 0) {
+          setRowErrors(prev => [...prev, ...res.batchRowErrors])
+        }
+        if (res.done) {
+          setDone(true)
+          // Only auto-refresh if no errors — otherwise keep errors visible
+          if (res.batchRowErrors.length === 0 && !processingError) {
+            router.refresh()
+          }
+          break
+        }
+        offset = res.processedSoFar
+      }
+      isRunning.current = false
+    }
+
+    run()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const pct = totalRows > 0 ? Math.min(100, Math.round((processed / totalRows) * 100)) : 0
+  const elapsed = (Date.now() - startTime) / 1000
+  const rate = processed > initialProcessed ? (processed - initialProcessed) / elapsed : 0
+  const remaining = rate > 0 ? Math.round((totalRows - processed) / rate) : null
+
+  const fmtTime = (s: number) => {
+    if (s < 60) return `${s}s`
+    if (s < 3600) return `${Math.round(s / 60)}m`
+    return `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span className="font-medium">
+          {done ? 'Complete' : `Processing…`} — {processed} / {totalRows}
+        </span>
+        {!done && remaining !== null && <span>~{fmtTime(remaining)} remaining</span>}
+        {done && <span className="text-green-600 font-semibold">Done ✓</span>}
+      </div>
+
+      {/* Progress bar */}
+      <div className="h-2.5 bg-muted rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-300 ${done ? 'bg-green-500' : 'bg-primary'}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+
+      {/* Stats */}
+      <div className="flex gap-3 text-[11px]">
+        <span className="font-bold">{pct}%</span>
+        <span className="text-green-600">✓ {stats.created} created</span>
+        {stats.skipped > 0 && <span className="text-muted-foreground">↷ {stats.skipped} skipped</span>}
+        {stats.errors > 0 && <span className="text-destructive">✗ {stats.errors} errors</span>}
+      </div>
+
+      {processingError && (
+        <p className="text-xs text-destructive bg-destructive/10 rounded px-2 py-1 font-mono">{processingError}</p>
+      )}
+      {rowErrors.length > 0 && (
+        <div className="text-xs bg-destructive/10 border border-destructive/20 rounded p-2 space-y-1">
+          <p className="font-semibold text-destructive">Row errors — check terminal for details:</p>
+          {rowErrors.map((e, i) => (
+            <p key={i} className="font-mono text-destructive/80 break-all">{e}</p>
+          ))}
+          {done && <button onClick={() => router.refresh()} className="mt-1 text-xs underline text-muted-foreground">Dismiss and refresh</button>}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -573,17 +686,15 @@ function UploadDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v:
               <div className="rounded-lg border border-border overflow-hidden max-h-60 overflow-y-auto">
                 <table className="w-full text-xs table-fixed">
                   <colgroup>
-                    <col className="w-[35%]" />
+                    <col className="w-[30%]" />
                     <col className="w-[20%]" />
-                    <col className="w-[25%]" />
-                    <col className="w-[20%]" />
+                    <col className="w-[50%]" />
                   </colgroup>
                   <thead className="sticky top-0 bg-muted border-b border-border">
                     <tr>
                       <th className="text-left px-3 py-2.5 font-semibold text-muted-foreground tracking-wide uppercase text-[10px]">Email</th>
                       <th className="text-left px-3 py-2.5 font-semibold text-muted-foreground tracking-wide uppercase text-[10px]">Name</th>
-                      <th className="text-left px-3 py-2.5 font-semibold text-muted-foreground tracking-wide uppercase text-[10px]">Business</th>
-                      <th className="text-left px-3 py-2.5 font-semibold text-muted-foreground tracking-wide uppercase text-[10px]">Location</th>
+                      <th className="text-left px-3 py-2.5 font-semibold text-muted-foreground tracking-wide uppercase text-[10px]">Business URL</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -591,9 +702,8 @@ function UploadDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v:
                       <tr key={i} className="hover:bg-muted/40 transition-colors">
                         <td className="px-3 py-2.5 text-muted-foreground truncate" title={r.email}>{r.email}</td>
                         <td className="px-3 py-2.5 font-medium truncate">{r.full_name}</td>
-                        <td className="px-3 py-2.5 text-muted-foreground truncate">{r.business_name || '—'}</td>
-                        <td className="px-3 py-2.5 text-muted-foreground truncate">
-                          {[r.city, r.country].filter(Boolean).join(', ') || '—'}
+                        <td className="px-3 py-2.5 text-muted-foreground truncate font-mono text-[10px]" title={r.business_url}>
+                          {r.business_url || '—'}
                         </td>
                       </tr>
                     ))}
