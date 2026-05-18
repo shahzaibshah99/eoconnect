@@ -81,9 +81,13 @@ export async function GET(request: NextRequest) {
     member_day7: 0,
     member_final: 0,
     member_expired: 0,
-    claim_day1: 0,
+    claim_day3: 0,
     claim_day7: 0,
-    claim_day30: 0,
+    claim_day14: 0,
+    claim_day21: 0,
+    claim_day35: 0,
+    claim_day50: 0,
+    claim_day59: 0,
     errors: 0,
   }
 
@@ -111,11 +115,16 @@ export async function GET(request: NextRequest) {
   })
 
   // ── Pre-populated claim reminders ───────────────────────────
-  // Dormant until F03 starts populating businesses.claim_email_sent_at.
-  // The query is harmless on empty input — costs one indexed scan.
-  await runClaimStage({ dbAny, summary, kind: 'day1', minDaysAgo: 1, maxDaysAgo: 7, sentinel: 'claim_reminder_day1_sent', counter: 'claim_day1' })
-  await runClaimStage({ dbAny, summary, kind: 'day7', minDaysAgo: 7, maxDaysAgo: 30, sentinel: 'claim_reminder_day7_sent', counter: 'claim_day7' })
-  await runClaimStage({ dbAny, summary, kind: 'day30', minDaysAgo: 30, maxDaysAgo: 60, sentinel: 'claim_reminder_day30_sent', counter: 'claim_day30' })
+  // Runs daily. Each stage fires once per listing (sentinel in events_log
+  // keeps re-runs idempotent). Windows are non-overlapping so a listing
+  // only gets one email per stage even if the cron runs multiple times.
+  await runClaimStage({ dbAny, summary, kind: 'day3',  minDaysAgo: 3,  maxDaysAgo: 7,  sentinel: 'claim_reminder_day3_sent',  counter: 'claim_day3'  })
+  await runClaimStage({ dbAny, summary, kind: 'day7',  minDaysAgo: 7,  maxDaysAgo: 14, sentinel: 'claim_reminder_day7_sent',  counter: 'claim_day7'  })
+  await runClaimStage({ dbAny, summary, kind: 'day14', minDaysAgo: 14, maxDaysAgo: 21, sentinel: 'claim_reminder_day14_sent', counter: 'claim_day14' })
+  await runClaimStage({ dbAny, summary, kind: 'day21', minDaysAgo: 21, maxDaysAgo: 35, sentinel: 'claim_reminder_day21_sent', counter: 'claim_day21' })
+  await runClaimStage({ dbAny, summary, kind: 'day35', minDaysAgo: 35, maxDaysAgo: 50, sentinel: 'claim_reminder_day35_sent', counter: 'claim_day35' })
+  await runClaimStage({ dbAny, summary, kind: 'day50', minDaysAgo: 50, maxDaysAgo: 59, sentinel: 'claim_reminder_day50_sent', counter: 'claim_day50' })
+  await runClaimStage({ dbAny, summary, kind: 'day59', minDaysAgo: 59, maxDaysAgo: 60, sentinel: 'claim_reminder_day59_sent', counter: 'claim_day59' })
 
   return NextResponse.json({ ok: true, ...summary })
 }
@@ -193,12 +202,12 @@ async function runMemberStage(opts: {
 async function runClaimStage(opts: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   dbAny: any
-  summary: { errors: number; claim_day1: number; claim_day7: number; claim_day30: number; [k: string]: number }
-  kind: 'day1' | 'day7' | 'day30'
+  summary: { errors: number; [k: string]: number }
+  kind: string
   minDaysAgo: number
   maxDaysAgo: number
   sentinel: string
-  counter: 'claim_day1' | 'claim_day7' | 'claim_day30'
+  counter: string
 }) {
   const { dbAny, summary, sentinel, counter } = opts
   const minIso = new Date(Date.now() - opts.minDaysAgo * 24 * 60 * 60 * 1000).toISOString()
