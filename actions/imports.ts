@@ -163,22 +163,10 @@ export async function approveCsvImport(id: string): Promise<{ error: string | nu
     row_count: row.row_count,
   })
 
-  // Auto-process immediately — create listings and send claim emails.
-  const processRes = await markCsvImportProcessed(id)
-  if (processRes.error) {
-    console.error('[csv-import] auto-process after approval failed:', processRes.error)
-    // Return the error so the UI can show it. Approval is still recorded.
-    return { error: processRes.error }
-  }
-
+  // Processing is now driven by the UI in batches via processCsvBatch.
+  // We mark approved and return — the progress bar component takes over.
   revalidatePath('/admin/imports')
-  return {
-    error: null,
-    created: processRes.created,
-    skipped: processRes.skipped,
-    rowErrors: processRes.rowErrors,
-    emailErrors: processRes.emailErrors,
-  }
+  return { error: null }
 }
 
 export async function rejectCsvImport(id: string, note: string): Promise<{ error: string | null }> {
@@ -286,9 +274,13 @@ export async function markCsvImportProcessed(id: string): Promise<{
       .select('id')
       .ilike('email', r.email)
       .limit(1) as { data: Array<{ id: string }> | null }
-    if (existing && existing.length > 0) {
-      skipped++
-      continue
+    if (existing && existing.length > 0) { skipped++; continue }
+
+    // Skip if same website already has a listing
+    if (r.business_url?.trim()) {
+      const { data: existingWebsite } = await svc
+        .from('businesses').select('id').ilike('website', r.business_url.trim()).limit(1) as { data: Array<{ id: string }> | null }
+      if (existingWebsite && existingWebsite.length > 0) { skipped++; continue }
     }
 
     // Step 1: Scrape website for name, description, logo, cover
@@ -302,28 +294,26 @@ export async function markCsvImportProcessed(id: string): Promise<{
       ? await scrapeLinkedInCompany(r.linkedin_url.trim())
       : null
 
-    // Step 3: AI generates tags + polished description from all data
-    //
-    // Guard: if the scraped name matches the person's name exactly it
-    // means we hit a directory profile page (e.g. "Nick Clift is a profile
-    // on Tenassia") rather than the actual business site. Discard it and
-    // prefer LinkedIn name or fall back to the person's name only as a
-    // last resort.
+    // Step 3: AI determines company name + generates all listing data.
+    // The AI now owns name resolution — it cross-references the domain,
+    // scraped site name, and page description to find the real company
+    // name rather than blindly accepting a generic page title like "Home".
     const scrapedName = webScraped?.name
-    const scrapedNameIsPersonName = !!scrapedName &&
-      scrapedName.toLowerCase().trim() === r.full_name.toLowerCase().trim()
-    const businessName = r.business_name?.trim() ||
-      (!scrapedNameIsPersonName ? scrapedName : null) ||
-      linkedIn?.name ||
-      r.full_name
     const rawDesc = linkedIn?.description || webScraped?.description || null
     const aiData = await generateBusinessTags({
-      name: businessName,
+      websiteUrl: r.business_url?.trim() || null,
+      scrapedName: scrapedName || null,
       rawDescription: rawDesc,
       industry: linkedIn?.industry || null,
       specialties: linkedIn?.specialties ?? [],
-      website: r.business_url?.trim() || null,
+      contactName: r.full_name,
     })
+
+    // Name priority: CSV business_name (explicit) > AI-determined > LinkedIn > full_name fallback
+    const businessName = r.business_name?.trim() ||
+      aiData?.name ||
+      linkedIn?.name ||
+      r.full_name
 
     const createRes = await _createPrePopulatedListing(svc, {
       name: businessName,
@@ -383,6 +373,152 @@ export async function markCsvImportProcessed(id: string): Promise<{
   revalidatePath('/admin/imports')
   revalidatePath('/marketplace')
   return { error: null, created, skipped, rowErrors, emailErrors }
+}
+
+// ── Batch processing (for large imports with progress bar) ────
+//
+// processCsvBatch processes a slice of rows [offset, offset+batchSize)
+// and updates processed_count in the DB after each batch. The UI calls
+// this repeatedly — starting at offset=0, then offset=batchSize, etc. —
+// until done=true is returned.
+//
+// Progress survives browser refresh: on remount the UI reads processed_count
+// from the import row and resumes from that offset automatically.
+
+export async function processCsvBatch(
+  id: string,
+  offset: number,
+  batchSize: number
+): Promise<{
+  error: string | null
+  done: boolean
+  batchCreated: number
+  batchSkipped: number
+  batchRowErrors: string[]
+  batchEmailErrors: string[]
+  processedSoFar: number
+  totalRows: number
+}> {
+  const EMPTY = { error: null, done: false, batchCreated: 0, batchSkipped: 0, batchRowErrors: [], batchEmailErrors: [], processedSoFar: offset, totalRows: 0 }
+  const ctx = await requireAdmin()
+  if (ctx.error) return { ...EMPTY, error: ctx.error }
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return { ...EMPTY, error: 'SUPABASE_SERVICE_ROLE_KEY not set' }
+
+  const svc = adminDb()
+  const { data: imp } = await svc
+    .from('csv_imports')
+    .select('id, status, row_count, payload')
+    .eq('id', id)
+    .maybeSingle() as { data: { id: string; status: string; row_count: number; payload: { rows: CsvRow[]; result?: { created: number; skipped: number; rowErrors: string[]; emailErrors: string[] } } } | null }
+
+  if (!imp) return { ...EMPTY, error: 'Import not found' }
+  if (imp.status !== 'approved') return { ...EMPTY, error: `Import status is '${imp.status}' — must be 'approved'` }
+
+  const allRows = imp.payload?.rows ?? []
+  const totalRows = allRows.length
+  const batch = allRows.slice(offset, offset + batchSize)
+
+  let batchCreated = 0
+  let batchSkipped = 0
+  const batchRowErrors: string[] = []
+  const batchEmailErrors: string[] = []
+
+  for (const r of batch) {
+    const { data: existing } = await svc
+      .from('businesses').select('id').ilike('email', r.email).limit(1) as { data: Array<{ id: string }> | null }
+    if (existing && existing.length > 0) { batchSkipped++; continue }
+
+    // Also skip if a listing with the same website already exists
+    if (r.business_url?.trim()) {
+      const { data: existingWebsite } = await svc
+        .from('businesses').select('id').ilike('website', r.business_url.trim()).limit(1) as { data: Array<{ id: string }> | null }
+      if (existingWebsite && existingWebsite.length > 0) {
+        batchRowErrors.push(`${r.email}: website ${r.business_url} already has a listing`)
+        batchSkipped++
+        continue
+      }
+    }
+
+    const webScraped = r.business_url?.trim() ? await scrapeWebsiteBasics(r.business_url.trim()) : null
+    const linkedIn = r.linkedin_url?.trim() ? await scrapeLinkedInCompany(r.linkedin_url.trim()) : null
+    const rawDesc = linkedIn?.description || webScraped?.description || null
+    const aiData = await generateBusinessTags({
+      websiteUrl: r.business_url?.trim() || null,
+      scrapedName: webScraped?.name || null,
+      rawDescription: rawDesc,
+      industry: linkedIn?.industry || null,
+      specialties: linkedIn?.specialties ?? [],
+      contactName: r.full_name,
+    })
+
+    const businessName = r.business_name?.trim() || aiData?.name || linkedIn?.name || r.full_name
+
+    const createRes = await _createPrePopulatedListing(svc, {
+      name: businessName, email: r.email, full_name: r.full_name,
+      tagline: aiData?.tagline || webScraped?.tagline || '',
+      description: aiData?.description || rawDesc || '',
+      website: r.business_url?.trim() || '',
+      logo_url: linkedIn?.logo_url || webScraped?.logo_url || '',
+      cover_url: linkedIn?.cover_url || webScraped?.cover_url || '',
+      phone: webScraped?.phone || '',
+      founded_year: linkedIn?.founded_year ?? webScraped?.founded_year ?? null,
+      team_size: linkedIn?.employee_count || '',
+      tags: aiData?.tags ?? [],
+      city: r.city || '', country: r.country || '',
+    })
+
+    if (createRes.error || !createRes.business_id) {
+      const msg = `${r.email}: ${createRes.error ?? 'unknown error'}`
+      console.error('[csv-batch] listing create failed:', msg)
+      batchRowErrors.push(msg)
+      batchSkipped++
+      continue
+    }
+    batchCreated++
+
+    const sendRes = await _sendClaimEmail(svc, createRes.business_id, r.full_name)
+    if (sendRes.error) {
+      console.error('[csv-batch] email failed:', r.email, sendRes.error)
+      batchEmailErrors.push(`${r.email}: ${sendRes.error}`)
+    }
+  }
+
+  // Accumulate result across batches in payload.result
+  const prev = imp.payload?.result ?? { created: 0, skipped: 0, rowErrors: [], emailErrors: [] }
+  const accumulated = {
+    created: prev.created + batchCreated,
+    skipped: prev.skipped + batchSkipped,
+    rowErrors: [...prev.rowErrors, ...batchRowErrors],
+    emailErrors: [...prev.emailErrors, ...batchEmailErrors],
+  }
+
+  const processedSoFar = Math.min(offset + batchSize, totalRows)
+  const done = processedSoFar >= totalRows
+
+  await svc.from('csv_imports').update({
+    processed_count: processedSoFar,
+    ...(done ? {
+      status: 'processed',
+      processed_at: new Date().toISOString(),
+    } : {}),
+    payload: { rows: allRows, result: accumulated },
+  }).eq('id', id)
+
+  if (done) {
+    await logEvent(svc, 'csv_import_processed', ctx.user!.id, id, {
+      row_count: totalRows,
+      created: accumulated.created,
+      skipped: accumulated.skipped,
+    })
+    revalidatePath('/admin/imports')
+    revalidatePath('/marketplace')
+  }
+
+  return {
+    error: null, done,
+    batchCreated, batchSkipped, batchRowErrors, batchEmailErrors,
+    processedSoFar, totalRows,
+  }
 }
 
 // ── Per-import claim status ───────────────────────────────────
