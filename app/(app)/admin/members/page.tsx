@@ -21,7 +21,7 @@ export default async function AdminMembersPage() {
     } | null
   }
 
-  let query = db.from('profiles').select('id, full_name, eo_chapter, role, status, created_at, eo_membership_email, admin_scope_country, admin_scope_city, chapter_country, chapter_city').order('created_at', { ascending: false })
+  let query = db.from('profiles').select('id, full_name, eo_chapter, role, status, created_at, eo_membership_email, admin_scope_country, admin_scope_city, chapter_country, chapter_city, avatar_url').order('created_at', { ascending: false })
   // Chapter admins only see members within their assigned scope.
   if (me?.role === 'chapter_admin' && me.admin_scope_country) {
     query = query.eq('chapter_country', me.admin_scope_country)
@@ -39,6 +39,7 @@ export default async function AdminMembersPage() {
       eo_membership_email: string | null
       admin_scope_country: string | null
       admin_scope_city: string | null
+      avatar_url: string | null
     }> | null
   }
 

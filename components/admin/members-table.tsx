@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils'
 import { ChapterPicker, type Chapter } from '@/components/forms/chapter-picker'
 import { describeChapterScope } from '@/lib/chapter-scope'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 
 type Status = 'pending' | 'active' | 'suspended' | 'archived'
 type Role = 'member' | 'chapter_admin' | 'super_admin'
@@ -25,6 +26,7 @@ interface Member {
   eo_membership_email: string | null
   admin_scope_country: string | null
   admin_scope_city: string | null
+  avatar_url: string | null
 }
 
 const STATUS_VARIANTS: Record<Status, string> = {
@@ -175,10 +177,20 @@ function MemberRow({ member, canChangeRole, chapters }: { member: Member; canCha
     <>
       <tr className={cn('border-b border-border last:border-0 hover:bg-muted/20', isArchived && 'opacity-60')}>
         <td className="p-3">
-          <p className="font-medium">{member.full_name}</p>
-          {member.eo_membership_email && (
-            <p className="text-xs text-muted-foreground">{member.eo_membership_email}</p>
-          )}
+          <div className="flex items-center gap-2.5">
+            <Avatar className="h-8 w-8 shrink-0">
+              <AvatarImage src={member.avatar_url ?? undefined} />
+              <AvatarFallback className="bg-primary/15 text-primary text-xs font-bold">
+                {(member.full_name ?? '?').charAt(0).toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0">
+              <p className="font-medium">{member.full_name}</p>
+              {member.eo_membership_email && (
+                <p className="text-xs text-muted-foreground truncate">{member.eo_membership_email}</p>
+              )}
+            </div>
+          </div>
         </td>
         <td className="p-3 text-muted-foreground">{member.eo_chapter ?? '—'}</td>
         <td className="p-3">
@@ -212,30 +224,32 @@ function MemberRow({ member, canChangeRole, chapters }: { member: Member; canCha
         <td className="p-3 text-muted-foreground text-xs">
           {format(new Date(member.created_at), 'MMM d, yyyy')}
         </td>
-        <td className="p-3 text-right space-x-1">
-          {isArchived ? (
-            <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('suspended')}>
-              Unarchive
-            </Button>
-          ) : (
-            <>
-              {member.status !== 'active' && (
-                <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('active')}>
-                  Approve
-                </Button>
-              )}
-              {member.status !== 'suspended' && (
-                <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('suspended')}
-                  className="text-destructive hover:text-destructive">
-                  Suspend
-                </Button>
-              )}
-              <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('archived')}
-                className="text-muted-foreground hover:text-foreground">
-                Archive
+        <td className="p-3">
+          <div className="flex items-center justify-end gap-1">
+            {isArchived ? (
+              <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('suspended')}>
+                Unarchive
               </Button>
-            </>
-          )}
+            ) : (
+              <>
+                {member.status !== 'active' && (
+                  <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('active')}>
+                    Approve
+                  </Button>
+                )}
+                {member.status !== 'suspended' && (
+                  <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('suspended')}
+                    className="text-destructive border-destructive/30 hover:bg-destructive/5 hover:text-destructive">
+                    Suspend
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('archived')}
+                  className="text-muted-foreground hover:text-foreground">
+                  Archive
+                </Button>
+              </>
+            )}
+          </div>
         </td>
       </tr>
       <ScopeDialog
