@@ -1,7 +1,6 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
-import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { sendEmail, welcomeEmail } from '@/lib/email/send'
 import { siteUrl } from '@/lib/site-url'
@@ -86,7 +85,7 @@ export async function signUp(formData: FormData): Promise<AuthResult> {
     html: welcomeEmail(parsed.data.fullName, base),
   })
 
-  redirect('/verify')
+  return { error: null }
 }
 
 export async function signIn(formData: FormData): Promise<AuthResult> {
@@ -106,13 +105,12 @@ export async function signIn(formData: FormData): Promise<AuthResult> {
   })
 
   if (error) return { error: error.message }
-  redirect('/marketplace')
+  return { error: null }
 }
 
 export async function signOut(): Promise<void> {
   const supabase = await createClient()
   await supabase.auth.signOut()
-  redirect('/login')
 }
 
 const ResetEmailSchema = z.object({
@@ -163,5 +161,5 @@ export async function updatePassword(formData: FormData): Promise<AuthResult> {
   const { error } = await supabase.auth.updateUser({ password: parsed.data.password })
 
   if (error) return { error: error.message }
-  redirect('/marketplace')
+  return { error: null }
 }

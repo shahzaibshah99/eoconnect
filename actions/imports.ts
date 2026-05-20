@@ -276,44 +276,27 @@ export async function markCsvImportProcessed(id: string): Promise<{
       .limit(1) as { data: Array<{ id: string }> | null }
     if (existing && existing.length > 0) { skipped++; continue }
 
-    // Skip if same website already has a listing
+    // Skip if same normalized website already has a listing.
     if (r.business_url?.trim()) {
       const { data: existingWebsite } = await svc
-        .from('businesses').select('id').ilike('website', r.business_url.trim()).limit(1) as { data: Array<{ id: string }> | null }
+        .from('businesses').select('id').eq('website_normalized', normalizeWebsite(r.business_url.trim())).limit(1) as { data: Array<{ id: string }> | null }
       if (existingWebsite && existingWebsite.length > 0) { skipped++; continue }
     }
 
-    // Step 1: Scrape website for name, description, logo, cover
-    const webScraped = r.business_url?.trim()
-      ? await scrapeWebsiteBasics(r.business_url.trim())
-      : null
-
-    // Step 2: Scrape LinkedIn company page for founded year,
-    // employee count, industry, specialties
-    const linkedIn = r.linkedin_url?.trim()
-      ? await scrapeLinkedInCompany(r.linkedin_url.trim())
-      : null
-
-    // Step 3: AI determines company name + generates all listing data.
-    // The AI now owns name resolution — it cross-references the domain,
-    // scraped site name, and page description to find the real company
-    // name rather than blindly accepting a generic page title like "Home".
-    const scrapedName = webScraped?.name
+    const webScraped = r.business_url?.trim() ? await scrapeWebsiteBasics(r.business_url.trim()) : null
+    const linkedIn = r.linkedin_url?.trim() ? await scrapeLinkedInCompany(r.linkedin_url.trim()) : null
     const rawDesc = linkedIn?.description || webScraped?.description || null
     const aiData = await generateBusinessTags({
       websiteUrl: r.business_url?.trim() || null,
-      scrapedName: scrapedName || null,
+      scrapedName: webScraped?.name || null,
       rawDescription: rawDesc,
       industry: linkedIn?.industry || null,
       specialties: linkedIn?.specialties ?? [],
       contactName: r.full_name,
     })
 
-    // Name priority: CSV business_name (explicit) > AI-determined > LinkedIn > full_name fallback
-    const businessName = r.business_name?.trim() ||
-      aiData?.name ||
-      linkedIn?.name ||
-      r.full_name
+    const businessName = [r.business_name?.trim(), aiData?.name, linkedIn?.name, r.full_name]
+      .find(n => n && n.trim().length >= 2) ?? r.full_name
 
     const createRes = await _createPrePopulatedListing(svc, {
       name: businessName,
@@ -324,7 +307,7 @@ export async function markCsvImportProcessed(id: string): Promise<{
       website: r.business_url?.trim() || '',
       logo_url: linkedIn?.logo_url || webScraped?.logo_url || '',
       cover_url: linkedIn?.cover_url || webScraped?.cover_url || '',
-      phone: webScraped?.phone || '',
+      phone: (webScraped?.phone || '').slice(0, 30),
       founded_year: linkedIn?.founded_year ?? webScraped?.founded_year ?? null,
       team_size: linkedIn?.employee_count || '',
       tags: aiData?.tags ?? [],
@@ -332,6 +315,10 @@ export async function markCsvImportProcessed(id: string): Promise<{
       country: r.country || '',
     })
     if (createRes.error || !createRes.business_id) {
+      if (createRes.error?.includes('businesses_unique_website') || createRes.error?.includes('duplicate key')) {
+        skipped++
+        continue
+      }
       const msg = `${r.email}: ${createRes.error ?? 'unknown error'}`
       console.error('[csv-processor] create failed:', msg)
       rowErrors.push(msg)
@@ -373,6 +360,17 @@ export async function markCsvImportProcessed(id: string): Promise<{
   revalidatePath('/admin/imports')
   revalidatePath('/marketplace')
   return { error: null, created, skipped, rowErrors, emailErrors }
+}
+
+// Mirrors the SQL generated column website_normalized in businesses.
+// Keeps the pre-check consistent with the DB constraint so we skip
+// duplicates rather than hitting the unique index on insert.
+function normalizeWebsite(url: string): string {
+  return url.trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/\/+$/, '')
 }
 
 // ── Batch processing (for large imports with progress bar) ────
@@ -428,15 +426,14 @@ export async function processCsvBatch(
       .from('businesses').select('id').ilike('email', r.email).limit(1) as { data: Array<{ id: string }> | null }
     if (existing && existing.length > 0) { batchSkipped++; continue }
 
-    // Also skip if a listing with the same website already exists
+    // Also skip if a listing with the same normalized website already exists.
+    // Must match website_normalized (not raw website) to catch http vs https,
+    // www vs no-www, trailing-slash variants — which all map to the same
+    // DB constraint but would pass a naive ilike check.
     if (r.business_url?.trim()) {
       const { data: existingWebsite } = await svc
-        .from('businesses').select('id').ilike('website', r.business_url.trim()).limit(1) as { data: Array<{ id: string }> | null }
-      if (existingWebsite && existingWebsite.length > 0) {
-        batchRowErrors.push(`${r.email}: website ${r.business_url} already has a listing`)
-        batchSkipped++
-        continue
-      }
+        .from('businesses').select('id').eq('website_normalized', normalizeWebsite(r.business_url.trim())).limit(1) as { data: Array<{ id: string }> | null }
+      if (existingWebsite && existingWebsite.length > 0) { batchSkipped++; continue }
     }
 
     const webScraped = r.business_url?.trim() ? await scrapeWebsiteBasics(r.business_url.trim()) : null
@@ -451,7 +448,9 @@ export async function processCsvBatch(
       contactName: r.full_name,
     })
 
-    const businessName = r.business_name?.trim() || aiData?.name || linkedIn?.name || r.full_name
+    // Pick the first name candidate with at least 2 chars (schema min).
+    const businessName = [r.business_name?.trim(), aiData?.name, linkedIn?.name, r.full_name]
+      .find(n => n && n.trim().length >= 2) ?? r.full_name
 
     const createRes = await _createPrePopulatedListing(svc, {
       name: businessName, email: r.email, full_name: r.full_name,
@@ -460,7 +459,7 @@ export async function processCsvBatch(
       website: r.business_url?.trim() || '',
       logo_url: linkedIn?.logo_url || webScraped?.logo_url || '',
       cover_url: linkedIn?.cover_url || webScraped?.cover_url || '',
-      phone: webScraped?.phone || '',
+      phone: (webScraped?.phone || '').slice(0, 30),
       founded_year: linkedIn?.founded_year ?? webScraped?.founded_year ?? null,
       team_size: linkedIn?.employee_count || '',
       tags: aiData?.tags ?? [],
@@ -468,6 +467,12 @@ export async function processCsvBatch(
     })
 
     if (createRes.error || !createRes.business_id) {
+      // Duplicate website constraint hit despite our pre-check (e.g. a race
+      // or an edge-case normalization the JS misses) — silent skip.
+      if (createRes.error?.includes('businesses_unique_website') || createRes.error?.includes('duplicate key')) {
+        batchSkipped++
+        continue
+      }
       const msg = `${r.email}: ${createRes.error ?? 'unknown error'}`
       console.error('[csv-batch] listing create failed:', msg)
       batchRowErrors.push(msg)

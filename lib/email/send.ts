@@ -773,6 +773,84 @@ export function supportInquiryEmail(input: {
   }
 }
 
+export function weeklyDigestEmail(input: {
+  memberName: string
+  newListingsCount: number
+  newListings: Array<{ name: string; category: string; id: string }>
+  openNeedsCount: number
+  openNeeds: Array<{ id: string; title: string; board_type: 'business' | 'community' }>
+  profileViews: number
+  siteUrl: string
+  unsubscribeToken: string
+}): { subject: string; html: string } | null {
+  const { memberName, newListingsCount, newListings, openNeedsCount, openNeeds, profileViews, siteUrl, unsubscribeToken } = input
+  if (newListingsCount === 0 && openNeedsCount === 0 && profileViews === 0) return null
+
+  const subject = `Your Member Market week: ${newListingsCount} new listing${newListingsCount === 1 ? '' : 's'}, ${openNeedsCount} open need${openNeedsCount === 1 ? '' : 's'}`
+
+  const listingsHtml = newListings.length > 0
+    ? `<p style="font-size:13px;font-weight:bold;color:#111;margin:0 0 10px 0;">New listings this week</p>
+       ${newListings.map(l => `
+         <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 8px 0;border:1px solid #e2e2e2;border-radius:8px;">
+           <tr>
+             <td style="padding:10px 14px;">
+               <a href="${siteUrl}/marketplace/${encodeURIComponent(l.id)}" style="font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;color:#0A5C46;text-decoration:none;">${escapeHtml(l.name)}</a>
+               <span style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#888;margin-left:8px;">${escapeHtml(l.category)}</span>
+             </td>
+           </tr>
+         </table>`).join('')}
+       <p style="margin:8px 0 0 0;">
+         <a href="${siteUrl}/marketplace" style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#0A5C46;">Browse all listings &rarr;</a>
+       </p>`
+    : ''
+
+  const needsHtml = openNeeds.length > 0
+    ? `<p style="font-size:13px;font-weight:bold;color:#111;margin:24px 0 10px 0;">Open needs &amp; leads</p>
+       ${openNeeds.map(n => `
+         <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 8px 0;border:1px solid #e2e2e2;border-radius:8px;">
+           <tr>
+             <td style="padding:10px 14px;">
+               <a href="${siteUrl}/bulletin" style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#111;text-decoration:none;">${escapeHtml(n.title)}</a>
+               <span style="display:inline-block;margin-left:8px;font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#888;background:#f4f4f4;padding:2px 8px;border-radius:10px;">${n.board_type === 'community' ? 'Community' : 'Business'}</span>
+             </td>
+           </tr>
+         </table>`).join('')}
+       <p style="margin:8px 0 0 0;">
+         <a href="${siteUrl}/bulletin" style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#0A5C46;">See all needs &rarr;</a>
+       </p>`
+    : ''
+
+  const viewsHtml = profileViews > 0
+    ? `<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin:24px 0 0 0;background:#F4F8F6;border-radius:10px;">
+         <tr>
+           <td style="padding:14px 18px;">
+             <p style="font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;color:#0A5C46;margin:0 0 2px 0;">${profileViews} profile view${profileViews === 1 ? '' : 's'} this week</p>
+             <p style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#555;margin:0;">Members are looking at your listing.
+               <a href="${siteUrl}/dashboard" style="color:#0A5C46;">Check your dashboard &rarr;</a>
+             </p>
+           </td>
+         </tr>
+       </table>`
+    : ''
+
+  return {
+    subject,
+    html: wrap(subject, `
+      <h1 style="font-size:18px;margin:0 0 6px;">Hi ${escapeHtml(memberName)}</h1>
+      <p style="font-size:14px;color:#555;margin:0 0 24px 0;">Here's what's new on Member Market this week.</p>
+      ${listingsHtml}
+      ${needsHtml}
+      ${viewsHtml}
+      <p style="margin-top:24px;">
+        <a href="${siteUrl}/marketplace" style="background:#0A5C46;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;">Open marketplace</a>
+      </p>
+      <p style="font-size:11px;color:#aaa;margin-top:20px;">
+        <a href="${siteUrl}/unsubscribe/digest?token=${unsubscribeToken}" style="color:#aaa;">Unsubscribe from weekly digests</a>
+      </p>
+    `),
+  }
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
 }
