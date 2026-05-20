@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { requestPasswordReset, updatePassword } from '@/actions/auth'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -26,6 +26,7 @@ import Link from 'next/link'
  */
 export function ResetPasswordForm() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const [isSettingNew, setIsSettingNew] = useState<boolean>(() => {
     return searchParams.get('type') === 'recovery'
   })
@@ -55,7 +56,8 @@ export function ResetPasswordForm() {
         ? await updatePassword(formData)
         : await requestPasswordReset(formData)
       if (result?.error) setError(result.error)
-      else if (!isSettingNew) setSuccess(true)
+      else if (isSettingNew) router.push('/marketplace')
+      else setSuccess(true)
     })
   }
 

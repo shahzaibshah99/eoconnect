@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useState, useTransition } from 'react'
 import { Settings, User, Menu, ShieldAlert, ShieldCheck } from 'lucide-react'
 import {
@@ -63,6 +63,7 @@ export function Navbar({
     ? [...baseLinks, { href: '/dashboard/ads', label: 'Ads' }]
     : baseLinks
   const pathname = usePathname()
+  const router = useRouter()
   const [isPending, startTransition] = useTransition()
   // F04: "Post a Need" is now the real bulletin board entry point.
   // Previously a Coming Soon placeholder dialog — now routes to /bulletin/new.
@@ -234,7 +235,7 @@ export function Navbar({
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-destructive cursor-pointer"
-                onClick={() => startTransition(() => { signOut() })}
+                onClick={() => startTransition(async () => { await signOut(); router.push('/login') })}
                 disabled={isPending}
               >
                 Sign Out
