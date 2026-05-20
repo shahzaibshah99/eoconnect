@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import Link from 'next/link'
+import { Eye, EyeOff } from 'lucide-react'
 
 /**
  * Reset password flow.
@@ -33,6 +34,7 @@ export function ResetPasswordForm() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [isPending, startTransition] = useTransition()
+  const [showPwd, setShowPwd] = useState(false)
 
   // Detect recovery mode from URL hash or Supabase auth state events.
   useEffect(() => {
@@ -94,7 +96,13 @@ export function ResetPasswordForm() {
           {isSettingNew ? (
             <div className="space-y-2">
               <Label htmlFor="password">New password</Label>
-              <Input id="password" name="password" type="password" placeholder="Min. 8 characters" required minLength={8} autoComplete="new-password" />
+              <div className="relative">
+                <Input id="password" name="password" type={showPwd ? 'text' : 'password'} placeholder="Min. 8 characters" required minLength={8} autoComplete="new-password" className="pr-10" />
+                <button type="button" tabIndex={-1} onClick={() => setShowPwd(v => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
           ) : (
             <div className="space-y-2">

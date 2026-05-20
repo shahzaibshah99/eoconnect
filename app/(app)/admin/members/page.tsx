@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { MembersTable } from '@/components/admin/members-table'
+import { InvitedListingsTable } from '@/components/admin/invited-listings-table'
 import chaptersData from '@/lib/data/eo-chapters.json'
 import type { Chapter } from '@/components/forms/chapter-picker'
 import { describeChapterScope } from '@/lib/chapter-scope'
@@ -48,7 +49,7 @@ export default async function AdminMembersPage() {
     .eq('is_pre_populated', true)
     .is('owner_id', null)
     .order('created_at', { ascending: false })
-    .limit(200) as {
+    .limit(5000) as {
     data: Array<{ id: string; name: string; email: string | null; created_at: string; claim_email_sent_at: string | null }> | null
   }
 
@@ -72,35 +73,7 @@ export default async function AdminMembersPage() {
               Claim email sent · no account yet
             </span>
           </div>
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-muted border-b border-border">
-                <tr>
-                  <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Business</th>
-                  <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Email invited</th>
-                  <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Invited</th>
-                  <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Claim email sent</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {invitedListings.map(l => (
-                  <tr key={l.id} className="hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-2.5 font-medium">{l.name}</td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{l.email ?? '—'}</td>
-                    <td className="px-4 py-2.5 text-muted-foreground text-xs">
-                      {new Date(l.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-2.5 text-xs">
-                      {l.claim_email_sent_at
-                        ? <span className="text-green-600 dark:text-green-400">✓ {new Date(l.claim_email_sent_at).toLocaleDateString()}</span>
-                        : <span className="text-yellow-600">Pending</span>
-                      }
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <InvitedListingsTable listings={invitedListings} />
         </div>
       )}
 

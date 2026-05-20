@@ -4,7 +4,7 @@ import { AuditLog, type AuditEvent } from '@/components/admin/audit-log'
 
 export const dynamic = 'force-dynamic'
 
-const PAGE_SIZE = 200
+const PAGE_SIZE = 2000
 
 interface PageProps {
   searchParams: Promise<{ category?: string; window?: string }>

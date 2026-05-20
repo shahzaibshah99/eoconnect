@@ -662,3 +662,57 @@ export async function extendPost(postId: string): Promise<{ error: string | null
   revalidatePath(`${extendBasePath}/${postId}`)
   return { error: null }
 }
+
+export interface MentionResult {
+  id: string
+  name: string
+  handle: string
+  type: 'member' | 'business'
+  avatar_url: string | null
+  subtitle: string | null
+}
+
+export async function searchMembersForMention(query: string): Promise<MentionResult[]> {
+  if (!query || query.length < 1) return []
+  if (/[,()*]/.test(query)) return []
+
+  const supabase = await createClient()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = supabase as any
+  const safe = query.replace(/[%_\\]/g, m => '\\' + m)
+
+  const [{ data: profiles }, { data: businesses }] = await Promise.all([
+    db.from('profiles')
+      .select('id, full_name, eo_chapter, avatar_url')
+      .ilike('full_name', `%${safe}%`)
+      .eq('status', 'active')
+      .limit(5) as Promise<{ data: Array<{ id: string; full_name: string | null; eo_chapter: string | null; avatar_url: string | null }> | null }>,
+    db.from('businesses')
+      .select('id, name')
+      .ilike('name', `%${safe}%`)
+      .eq('status', 'published')
+      .limit(4) as Promise<{ data: Array<{ id: string; name: string }> | null }>,
+  ])
+
+  const members: MentionResult[] = (profiles ?? [])
+    .filter(p => p.full_name)
+    .map(p => ({
+      id: p.id,
+      name: p.full_name!,
+      handle: p.full_name!.replace(/\s+/g, '.'),
+      type: 'member' as const,
+      avatar_url: p.avatar_url,
+      subtitle: p.eo_chapter,
+    }))
+
+  const bizs: MentionResult[] = (businesses ?? []).map(b => ({
+    id: b.id,
+    name: b.name,
+    handle: b.name.replace(/\s+/g, '.'),
+    type: 'business' as const,
+    avatar_url: null,
+    subtitle: 'Business',
+  }))
+
+  return [...members, ...bizs].slice(0, 8)
+}

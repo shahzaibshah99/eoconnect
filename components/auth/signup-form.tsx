@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { GoogleButton } from './google-button'
 import Link from 'next/link'
+import { Eye, EyeOff } from 'lucide-react'
 
 /**
  * Signup form: collects only the bare minimum needed to create an auth
@@ -33,6 +34,7 @@ import Link from 'next/link'
 export function SignupForm() {
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+  const [showPwd, setShowPwd] = useState(false)
   const router = useRouter()
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -81,7 +83,13 @@ export function SignupForm() {
           </div>
           <div className="space-y-2">
             <Label htmlFor="password">Password</Label>
-            <Input id="password" name="password" type="password" placeholder="Min. 8 characters" required minLength={8} autoComplete="new-password" />
+            <div className="relative">
+              <Input id="password" name="password" type={showPwd ? 'text' : 'password'} placeholder="Min. 8 characters" required minLength={8} autoComplete="new-password" className="pr-10" />
+              <button type="button" tabIndex={-1} onClick={() => setShowPwd(v => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
           </div>
           <Button type="submit" className="w-full bg-primary text-primary-foreground font-bold" disabled={isPending}>
             {isPending ? 'Creating account…' : 'Create Account'}

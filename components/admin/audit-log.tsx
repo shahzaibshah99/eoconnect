@@ -5,8 +5,11 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { format, formatDistanceToNow } from 'date-fns'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, ChevronLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
+
+const PAGE_SIZE_OPTIONS = [20, 50] as const
+type PageSize = typeof PAGE_SIZE_OPTIONS[number]
 
 type Json = string | number | boolean | null | { [k: string]: Json | undefined } | Json[]
 
@@ -81,6 +84,8 @@ export function AuditLog({ events, initialWindow }: { events: AuditEvent[]; init
   const searchParams = useSearchParams()
   const [filter, setFilter] = useState<string>('all')
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState<PageSize>(20)
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: events.length }
@@ -104,6 +109,12 @@ export function AuditLog({ events, initialWindow }: { events: AuditEvent[]; init
     return true
   })
 
+  const totalPages = Math.ceil(visible.length / pageSize)
+  const paginated = visible.slice(page * pageSize, (page + 1) * pageSize)
+
+  const handleFilter = (f: string) => { setFilter(f); setPage(0) }
+  const handleSearch = (q: string) => { setSearch(q); setPage(0) }
+
   const setWindow = (win: Window) => {
     const sp = new URLSearchParams(searchParams.toString())
     sp.set('window', win)
@@ -118,7 +129,7 @@ export function AuditLog({ events, initialWindow }: { events: AuditEvent[]; init
             <input
               placeholder="Search by event type, admin name, or metadata…"
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={e => handleSearch(e.target.value)}
               className="flex-1 h-9 px-3 rounded-lg bg-background border border-border text-sm"
             />
             <div className="flex gap-1">
@@ -144,7 +155,7 @@ export function AuditLog({ events, initialWindow }: { events: AuditEvent[]; init
               return (
                 <button
                   key={c}
-                  onClick={() => setFilter(c)}
+                  onClick={() => handleFilter(c)}
                   className={cn(
                     'px-2.5 py-1 rounded-md text-[11px] font-medium capitalize',
                     filter === c ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'
@@ -163,8 +174,32 @@ export function AuditLog({ events, initialWindow }: { events: AuditEvent[]; init
           </div>
         ) : (
           <ul className="divide-y divide-border">
-            {visible.map(event => <EventRow key={event.id} event={event} />)}
+            {paginated.map(event => <EventRow key={event.id} event={event} />)}
           </ul>
+        )}
+        {visible.length > 0 && (
+          <div className="p-3 border-t border-border flex items-center justify-between gap-3 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <span>Show</span>
+              {PAGE_SIZE_OPTIONS.map(n => (
+                <button key={n} onClick={() => { setPageSize(n); setPage(0) }}
+                  className={cn('px-2 py-0.5 rounded text-xs font-medium', pageSize === n ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80')}>
+                  {n}
+                </button>
+              ))}
+            </div>
+            <span className="text-xs">{page * pageSize + 1}–{Math.min((page + 1) * pageSize, visible.length)} of {visible.length}</span>
+            <div className="flex gap-1">
+              <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+                className="p-1 rounded hover:bg-muted disabled:opacity-30">
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
+                className="p-1 rounded hover:bg-muted disabled:opacity-30">
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useTransition } from 'react'
+import { useState, useTransition } from 'react'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -10,6 +10,7 @@ import { AdminDeleteListingButton } from '@/components/admin/delete-listing-butt
 import { TransferListingButton } from '@/components/admin/transfer-listing-button'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 type Status = 'draft' | 'published' | 'paused'
 
@@ -42,9 +43,54 @@ const STATUS_COLORS: Record<Status, string> = {
   paused: 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20',
 }
 
+const PAGE_SIZE_OPTIONS = [20, 50, 100] as const
+type PageSize = typeof PAGE_SIZE_OPTIONS[number]
+
 export function ListingsTable({ listings, isSuperAdmin = false }: { listings: AdminListing[]; isSuperAdmin?: boolean }) {
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | Status>('all')
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState<PageSize>(50)
+
+  const filtered = listings.filter(l => {
+    if (statusFilter !== 'all' && l.status !== statusFilter) return false
+    if (search) {
+      const q = search.toLowerCase()
+      return (
+        l.name.toLowerCase().includes(q) ||
+        l.profiles?.full_name?.toLowerCase().includes(q) ||
+        l.profiles?.eo_chapter?.toLowerCase().includes(q) ||
+        l.profiles?.eo_membership_email?.toLowerCase().includes(q)
+      )
+    }
+    return true
+  })
+
+  const totalPages = Math.ceil(filtered.length / pageSize)
+  const paginated = filtered.slice(page * pageSize, (page + 1) * pageSize)
+
+  const handleSearch = (q: string) => { setSearch(q); setPage(0) }
+  const handleStatus = (s: typeof statusFilter) => { setStatusFilter(s); setPage(0) }
+
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <div className="p-4 border-b border-border flex flex-col sm:flex-row gap-3">
+        <input
+          placeholder="Search by name, owner, chapter…"
+          value={search}
+          onChange={e => handleSearch(e.target.value)}
+          className="flex-1 h-9 px-3 rounded-lg bg-background border border-border text-sm"
+        />
+        <div className="flex gap-1">
+          {(['all', 'published', 'draft', 'paused'] as const).map(s => (
+            <button key={s} onClick={() => handleStatus(s)}
+              className={cn('px-3 py-1.5 rounded-lg text-xs font-medium capitalize',
+                statusFilter === s ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80')}>
+              {s === 'all' ? `all (${listings.length})` : `${s} (${listings.filter(l => l.status === s).length})`}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -58,13 +104,37 @@ export function ListingsTable({ listings, isSuperAdmin = false }: { listings: Ad
             </tr>
           </thead>
           <tbody>
-            {listings.map(l => <ListingRow key={l.id} listing={l} isSuperAdmin={isSuperAdmin} />)}
-            {listings.length === 0 && (
-              <tr><td colSpan={6} className="text-center py-10 text-muted-foreground text-sm">No listings.</td></tr>
+            {paginated.map(l => <ListingRow key={l.id} listing={l} isSuperAdmin={isSuperAdmin} />)}
+            {paginated.length === 0 && (
+              <tr><td colSpan={6} className="text-center py-10 text-muted-foreground text-sm">No listings match your filter.</td></tr>
             )}
           </tbody>
         </table>
       </div>
+      {filtered.length > 0 && (
+        <div className="p-3 border-t border-border flex items-center justify-between gap-3 text-sm text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span>Show</span>
+            {PAGE_SIZE_OPTIONS.map(n => (
+              <button key={n} onClick={() => { setPageSize(n); setPage(0) }}
+                className={cn('px-2 py-0.5 rounded text-xs font-medium', pageSize === n ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80')}>
+                {n}
+              </button>
+            ))}
+          </div>
+          <span className="text-xs">{page * pageSize + 1}–{Math.min((page + 1) * pageSize, filtered.length)} of {filtered.length}</span>
+          <div className="flex gap-1">
+            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+              className="p-1 rounded hover:bg-muted disabled:opacity-30">
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
+              className="p-1 rounded hover:bg-muted disabled:opacity-30">
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

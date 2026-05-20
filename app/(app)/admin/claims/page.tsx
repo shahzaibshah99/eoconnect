@@ -1,8 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { format, formatDistanceToNow } from 'date-fns'
-import { Badge } from '@/components/ui/badge'
-import { CheckCircle2, Clock, Mail, User } from 'lucide-react'
+import { ClaimsTable } from '@/components/admin/claims-table'
 
 export const dynamic = 'force-dynamic'
 
@@ -79,80 +77,7 @@ export default async function AdminClaimsPage() {
           No pre-populated listings yet. Use CSV imports to create them.
         </div>
       ) : (
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-muted border-b border-border">
-              <tr>
-                <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Business</th>
-                <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Invited email</th>
-                <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Invite sent</th>
-                <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
-                <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Claimed by</th>
-                <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Claimed at</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {listings.map(l => {
-                const isClaimed = !!l.claimed_at
-                const hasEmail  = !!l.claim_email_sent_at
-                return (
-                  <tr key={l.id} className={`hover:bg-muted/30 transition-colors ${isClaimed ? 'bg-green-500/5' : ''}`}>
-                    <td className="px-4 py-3 font-medium">{l.name}</td>
-                    <td className="px-4 py-3 text-muted-foreground text-xs font-mono truncate max-w-[180px]" title={l.email ?? ''}>
-                      {l.email ?? '—'}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">
-                      {hasEmail ? (
-                        <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
-                          <Mail className="h-3 w-3" />
-                          {format(new Date(l.claim_email_sent_at!), 'MMM d, HH:mm')}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground/50">Not sent</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {isClaimed ? (
-                        <Badge className="border bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30 text-[10px] gap-1">
-                          <CheckCircle2 className="h-3 w-3" /> Claimed
-                        </Badge>
-                      ) : hasEmail ? (
-                        <Badge className="border bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20 text-[10px] gap-1">
-                          <Clock className="h-3 w-3" /> Pending
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary" className="text-[10px]">No invite</Badge>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {l.profiles ? (
-                        <div className="flex items-start gap-1.5">
-                          <User className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
-                          <div className="min-w-0">
-                            <p className="font-medium text-xs truncate">{l.profiles.full_name ?? '—'}</p>
-                            <p className="text-[11px] text-muted-foreground truncate">{l.profiles.eo_membership_email ?? ''}</p>
-                            {l.profiles.eo_chapter && (
-                              <p className="text-[10px] text-muted-foreground">{l.profiles.eo_chapter}</p>
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground/50 text-xs">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                      {l.claimed_at ? (
-                        <span title={format(new Date(l.claimed_at), 'PPpp')}>
-                          {formatDistanceToNow(new Date(l.claimed_at), { addSuffix: true })}
-                        </span>
-                      ) : '—'}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        <ClaimsTable listings={listings} />
       )}
     </div>
   )

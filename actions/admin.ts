@@ -190,7 +190,7 @@ export async function toggleCategoryActive(id: string, active: boolean): Promise
 
 export async function setMemberStatus(
   userId: string,
-  status: 'pending' | 'active' | 'suspended'
+  status: 'pending' | 'active' | 'suspended' | 'archived'
 ): Promise<{ error: string | null }> {
   const ctx = await requireAdmin()
   if (ctx.error) return { error: ctx.error }

@@ -10,8 +10,9 @@ import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { ChapterPicker, type Chapter } from '@/components/forms/chapter-picker'
 import { describeChapterScope } from '@/lib/chapter-scope'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 
-type Status = 'pending' | 'active' | 'suspended'
+type Status = 'pending' | 'active' | 'suspended' | 'archived'
 type Role = 'member' | 'chapter_admin' | 'super_admin'
 
 interface Member {
@@ -30,6 +31,7 @@ const STATUS_VARIANTS: Record<Status, string> = {
   active: 'bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20',
   pending: 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20',
   suspended: 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20',
+  archived: 'bg-muted text-muted-foreground border-border',
 }
 
 interface MembersTableProps {
@@ -38,12 +40,21 @@ interface MembersTableProps {
   chapters: Chapter[]
 }
 
+const PAGE_SIZE_OPTIONS = [20, 50, 100] as const
+type PageSize = typeof PAGE_SIZE_OPTIONS[number]
+
 export function MembersTable({ members, canChangeRole, chapters }: MembersTableProps) {
   const [filter, setFilter] = useState<'all' | Status>('all')
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState<PageSize>(50)
 
-  const filtered = members.filter(m => {
-    if (filter !== 'all' && m.status !== filter) return false
+  const nonArchived = members.filter(m => m.status !== 'archived')
+  const archived = members.filter(m => m.status === 'archived')
+
+  const base = filter === 'archived' ? archived : nonArchived
+  const filtered = base.filter(m => {
+    if (filter !== 'all' && filter !== 'archived' && m.status !== filter) return false
     if (search) {
       const q = search.toLowerCase()
       return m.full_name.toLowerCase().includes(q) || m.eo_chapter?.toLowerCase().includes(q) || m.eo_membership_email?.toLowerCase().includes(q)
@@ -51,26 +62,39 @@ export function MembersTable({ members, canChangeRole, chapters }: MembersTableP
     return true
   })
 
+  const totalPages = Math.ceil(filtered.length / pageSize)
+  const paginated = filtered.slice(page * pageSize, (page + 1) * pageSize)
+
+  const handleFilterChange = (f: typeof filter) => {
+    setFilter(f)
+    setPage(0)
+  }
+
+  const handleSearch = (q: string) => {
+    setSearch(q)
+    setPage(0)
+  }
+
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
       <div className="p-4 border-b border-border flex flex-col sm:flex-row gap-3">
         <input
           placeholder="Search by name, email, chapter…"
           value={search}
-          onChange={e => setSearch(e.target.value)}
+          onChange={e => handleSearch(e.target.value)}
           className="flex-1 h-9 px-3 rounded-lg bg-background border border-border text-sm"
         />
-        <div className="flex gap-1">
-          {(['all', 'pending', 'active', 'suspended'] as const).map(s => (
+        <div className="flex gap-1 flex-wrap">
+          {(['all', 'pending', 'active', 'suspended', 'archived'] as const).map(s => (
             <button
               key={s}
-              onClick={() => setFilter(s)}
+              onClick={() => handleFilterChange(s)}
               className={cn(
                 'px-3 py-1.5 rounded-lg text-xs font-medium capitalize',
                 filter === s ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'
               )}
             >
-              {s} {s !== 'all' && `(${members.filter(m => m.status === s).length})`}
+              {s === 'all' ? `all (${nonArchived.length})` : s === 'archived' ? `archived (${archived.length})` : `${s} (${nonArchived.filter(m => m.status === s).length})`}
             </button>
           ))}
         </div>
@@ -88,10 +112,10 @@ export function MembersTable({ members, canChangeRole, chapters }: MembersTableP
             </tr>
           </thead>
           <tbody>
-            {filtered.map(m => (
+            {paginated.map(m => (
               <MemberRow key={m.id} member={m} canChangeRole={canChangeRole} chapters={chapters} />
             ))}
-            {filtered.length === 0 && (
+            {paginated.length === 0 && (
               <tr>
                 <td colSpan={6} className="text-center py-10 text-muted-foreground text-sm">
                   No members match your filter.
@@ -101,6 +125,30 @@ export function MembersTable({ members, canChangeRole, chapters }: MembersTableP
           </tbody>
         </table>
       </div>
+      {filtered.length > 0 && (
+        <div className="p-3 border-t border-border flex items-center justify-between gap-3 text-sm text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span>Show</span>
+            {PAGE_SIZE_OPTIONS.map(n => (
+              <button key={n} onClick={() => { setPageSize(n); setPage(0) }}
+                className={cn('px-2 py-0.5 rounded text-xs font-medium', pageSize === n ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80')}>
+                {n}
+              </button>
+            ))}
+          </div>
+          <span className="text-xs">{page * pageSize + 1}–{Math.min((page + 1) * pageSize, filtered.length)} of {filtered.length}</span>
+          <div className="flex gap-1">
+            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+              className="p-1 rounded hover:bg-muted disabled:opacity-30">
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
+              className="p-1 rounded hover:bg-muted disabled:opacity-30">
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -114,18 +162,18 @@ function MemberRow({ member, canChangeRole, chapters }: { member: Member; canCha
 
   const changeRole = (role: Role) => {
     if (role === 'chapter_admin') {
-      // Prompt for scope before applying — admin needs a chapter assignment.
       setScopeDialogOpen(true)
-      // Optimistically update role too:
       startTransition(() => { setMemberRole(member.id, role) })
       return
     }
     startTransition(() => { setMemberRole(member.id, role) })
   }
 
+  const isArchived = member.status === 'archived'
+
   return (
     <>
-      <tr className="border-b border-border last:border-0 hover:bg-muted/20">
+      <tr className={cn('border-b border-border last:border-0 hover:bg-muted/20', isArchived && 'opacity-60')}>
         <td className="p-3">
           <p className="font-medium">{member.full_name}</p>
           {member.eo_membership_email && (
@@ -134,7 +182,7 @@ function MemberRow({ member, canChangeRole, chapters }: { member: Member; canCha
         </td>
         <td className="p-3 text-muted-foreground">{member.eo_chapter ?? '—'}</td>
         <td className="p-3">
-          {canChangeRole ? (
+          {canChangeRole && !isArchived ? (
             <div className="flex flex-col gap-1">
               <Select value={member.role} onValueChange={(v: string | null) => v && changeRole(v as Role)}>
                 <SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger>
@@ -165,16 +213,28 @@ function MemberRow({ member, canChangeRole, chapters }: { member: Member; canCha
           {format(new Date(member.created_at), 'MMM d, yyyy')}
         </td>
         <td className="p-3 text-right space-x-1">
-          {member.status !== 'active' && (
-            <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('active')}>
-              Approve
+          {isArchived ? (
+            <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('suspended')}>
+              Unarchive
             </Button>
-          )}
-          {member.status !== 'suspended' && (
-            <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('suspended')}
-              className="text-destructive hover:text-destructive">
-              Suspend
-            </Button>
+          ) : (
+            <>
+              {member.status !== 'active' && (
+                <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('active')}>
+                  Approve
+                </Button>
+              )}
+              {member.status !== 'suspended' && (
+                <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('suspended')}
+                  className="text-destructive hover:text-destructive">
+                  Suspend
+                </Button>
+              )}
+              <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('archived')}
+                className="text-muted-foreground hover:text-foreground">
+                Archive
+              </Button>
+            </>
           )}
         </td>
       </tr>
@@ -197,7 +257,6 @@ function ScopeDialog({
   chapters: Chapter[]
 }) {
   const [isPending, startTransition] = useTransition()
-  // Match the chapter that corresponds to the member's current scope, if any.
   const initial = chapters.find(c =>
     c.country === member.admin_scope_country &&
     (c.city ?? null) === (member.admin_scope_city ?? null)

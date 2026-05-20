@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { format, formatDistanceToNow } from 'date-fns'
-import { Users, Building2, MessageSquareWarning } from 'lucide-react'
+import { Users, Building2, MessageSquareWarning, ShieldCheck } from 'lucide-react'
 import { describeChapterScope } from '@/lib/chapter-scope'
 import { cn } from '@/lib/utils'
 
@@ -84,9 +84,10 @@ export default async function AdminOverviewPage() {
 
   // Lifetime totals shown in the heading. Use head:true count-only
   // queries — the rows themselves aren't needed here, just the number.
-  const totalMembersQuery = db.from('profiles').select('id', { count: 'exact', head: true })
+  const totalMembersQuery = db.from('profiles').select('id', { count: 'exact', head: true }).eq('status', 'active')
   const totalListingsQuery = db.from('businesses').select('id', { count: 'exact', head: true })
   const flaggedReviewsQuery = db.from('reviews').select('id', { count: 'exact', head: true }).eq('flagged', true)
+  const verificationsPendingQuery = db.from('verifications').select('id', { count: 'exact', head: true }).eq('status', 'pending')
 
   // Chapter admins' totals are scoped same as the recent list, so the
   // numbers match what they'd see clicking through to the deep pages.
@@ -96,10 +97,11 @@ export default async function AdminOverviewPage() {
       : totalMembersQuery.eq('chapter_country', me.admin_scope_country)
     : totalMembersQuery
 
-  const [{ count: totalMembers }, { count: totalListings }, { count: flaggedReviews }] = await Promise.all([
+  const [{ count: totalMembers }, { count: totalListings }, { count: flaggedReviews }, { count: verificationsPending }] = await Promise.all([
     scopedMembers as unknown as { count: number | null },
     totalListingsQuery as unknown as { count: number | null },
     flaggedReviewsQuery as unknown as { count: number | null },
+    verificationsPendingQuery as unknown as { count: number | null },
   ])
 
   const recentMembers = recent ?? []
@@ -115,10 +117,13 @@ export default async function AdminOverviewPage() {
         </p>
       </header>
 
-      <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <StatCard label="Members" value={totalMembers ?? 0} icon={<Users className="h-5 w-5" />} href="/admin/members" />
+      <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <StatCard label="Active Members" value={totalMembers ?? 0} icon={<Users className="h-5 w-5" />} href="/admin/members" />
         <StatCard label="Listings" value={totalListings ?? 0} icon={<Building2 className="h-5 w-5" />} href="/admin/listings" />
         <StatCard label="Flagged Reviews" value={flaggedReviews ?? 0} icon={<MessageSquareWarning className="h-5 w-5" />} href="/admin/reviews" />
+        {me.role === 'super_admin' && (
+          <StatCard label="Verifications Pending" value={verificationsPending ?? 0} icon={<ShieldCheck className="h-5 w-5" />} href="/admin/verifications" />
+        )}
       </section>
 
       <section className="space-y-3">

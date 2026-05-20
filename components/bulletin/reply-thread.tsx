@@ -5,12 +5,12 @@ import { useRouter } from 'next/navigation'
 import { replyToPost } from '@/actions/bulletin'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { formatDistanceToNow, format } from 'date-fns'
 import Link from 'next/link'
 import { MessageSquare, ChevronDown, Sparkles } from 'lucide-react'
 import type { ReferralSearchResult } from '@/lib/ai/referral-search'
+import { MentionTextarea, renderMentions } from '@/components/bulletin/mention-textarea'
 
 interface Reply {
   id: string
@@ -119,14 +119,13 @@ export function ReplyThread({
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
             Add a reply
           </p>
-          <Textarea
+          <MentionTextarea
             value={body}
-            onChange={e => setBody(e.target.value)}
-            placeholder="Share how you or your business can help…"
+            onChange={setBody}
+            placeholder="Share how you or your business can help… type @ to mention a member or business"
             rows={3}
             maxLength={2000}
             disabled={isPending}
-            className="resize-none"
           />
           <div className="flex items-center justify-between gap-2">
             <p className="text-[11px] text-muted-foreground">{body.length}/2000</p>
@@ -219,7 +218,7 @@ function ReplyCard({ reply, isCurrentUser, businessId }: { reply: Reply; isCurre
             {formatDistanceToNow(new Date(reply.created_at), { addSuffix: true })}
           </span>
         </div>
-        <p className="text-sm whitespace-pre-line">{reply.content}</p>
+        <p className="text-sm whitespace-pre-line">{renderMentions(reply.content)}</p>
       </div>
     </div>
   )
