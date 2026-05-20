@@ -199,13 +199,14 @@ function ImportRowItem({ row }: { row: ImportRow }) {
                 initialProcessed={row.processed_count ?? 0}
               />
             )}
-            {/* (i) icon — shows processing result for processed imports */}
-            {row.status === 'processed' && row.payload?.result && (
-              <ProcessingResult result={row.payload.result} />
-            )}
-            {/* Claim status — shows per-email claimed/pending for processed imports */}
+            {/* Live claim status — single source of truth for processed imports */}
             {row.status === 'processed' && row.payload?.rows && row.payload.rows.length > 0 && (
-              <ClaimStatus emails={row.payload.rows.map(r => r.email).filter(Boolean)} />
+              <ClaimStatus
+                emails={row.payload.rows.map(r => r.email).filter(Boolean)}
+                totalRows={row.row_count}
+                rowErrors={row.payload.result?.rowErrors ?? []}
+                emailErrors={row.payload.result?.emailErrors ?? []}
+              />
             )}
           </div>
         </div>
@@ -447,44 +448,104 @@ function BatchProgressBar({
 
 // ── Claim status for a processed import ──────────────────────
 
-function ClaimStatus({ emails }: { emails: string[] }) {
+function ClaimStatus({ emails, totalRows, rowErrors, emailErrors }: {
+  emails: string[]
+  totalRows: number
+  rowErrors: string[]
+  emailErrors: string[]
+}) {
   const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [errorsOpen, setErrorsOpen] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [data, setData] = useState<{
     claimed: number; pending: number
     details: Array<{ email: string; claimed: boolean; claimed_by: string | null; claimed_at: string | null }>
   } | null>(null)
 
-  const load = async () => {
-    if (data) { setOpen(v => !v); return }
-    setLoading(true)
-    const res = await getImportClaimStatus(emails)
-    if (!res.error) setData(res)
-    setLoading(false)
-    setOpen(true)
-  }
+  useEffect(() => {
+    getImportClaimStatus(emails).then(res => {
+      if (!res.error) setData(res)
+      setLoading(false)
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const created = data ? data.claimed + data.pending : 0
+  const notCreated = totalRows - created
+  const hasErrors = rowErrors.length > 0 || emailErrors.length > 0
 
   return (
-    <div className="mt-2">
-      <button
-        type="button"
-        onClick={load}
-        disabled={loading}
-        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-      >
-        {loading ? (
+    <div className="mt-3 space-y-2">
+
+      {/* Main summary */}
+      {loading ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="h-3 w-3 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-        ) : open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-        Claim status
-        {data && (
-          <span className="ml-1 font-medium text-green-600 dark:text-green-400">
-            {data.claimed}/{data.claimed + data.pending} claimed
-          </span>
-        )}
-      </button>
+          Loading stats…
+        </div>
+      ) : data ? (
+        <div className="p-3 rounded-lg border border-border bg-muted/30 space-y-2">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+            <span className="text-muted-foreground">CSV rows: <strong className="text-foreground">{totalRows}</strong></span>
+            <span className="text-green-700 dark:text-green-400">✓ Created: <strong>{created}</strong></span>
+            <span className="text-primary">Claimed: <strong>{data.claimed}</strong></span>
+            <span className="text-yellow-600 dark:text-yellow-400">Awaiting: <strong>{data.pending}</strong></span>
+            {notCreated > 0 && (
+              <span className="text-destructive">Not created: <strong>{notCreated}</strong></span>
+            )}
+          </div>
+
+          {/* Explain the not-created rows */}
+          {notCreated > 0 && (
+            <p className="text-xs text-muted-foreground border-t border-border pt-2">
+              <strong className="text-foreground">{notCreated} not created</strong> — these email addresses already existed in the system from a previous import and were skipped to avoid duplicates.
+            </p>
+          )}
+
+          {/* Only show errors if count makes sense (not stale) */}
+          {hasErrors && rowErrors.length <= notCreated && (
+            <>
+              <button type="button" onClick={() => setErrorsOpen(v => !v)}
+                className="inline-flex items-center gap-1 text-xs text-destructive hover:underline">
+                <Info className="h-3 w-3" />
+                {errorsOpen ? 'Hide' : 'Show'} error details ({rowErrors.length + emailErrors.length})
+              </button>
+              {errorsOpen && (
+                <div className="space-y-2">
+                  {rowErrors.length > 0 && (
+                    <div className="text-xs bg-red-500/10 border border-red-500/20 rounded p-2">
+                      <p className="font-semibold text-red-700 dark:text-red-400 mb-1">Row errors:</p>
+                      <ul className="list-disc pl-4 space-y-0.5 font-mono text-red-700 dark:text-red-400">
+                        {rowErrors.map((e, i) => <li key={i}>{e}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {emailErrors.length > 0 && (
+                    <div className="text-xs bg-yellow-500/10 border border-yellow-500/20 rounded p-2">
+                      <p className="font-semibold text-yellow-700 mb-1">Email errors (listings still created):</p>
+                      <ul className="list-disc pl-4 space-y-0.5 font-mono">
+                        {emailErrors.map((e, i) => <li key={i}>{e}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {/* Per-email breakdown toggle */}
+      {data && created > 0 && (
+        <button type="button" onClick={() => setOpen(v => !v)}
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+          {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          {open ? 'Hide' : 'Show'} per-email breakdown
+        </button>
+      )}
 
       {open && data && (
-        <div className="mt-2 rounded-lg border border-border bg-muted/30 overflow-hidden">
+        <div className="rounded-lg border border-border bg-muted/30 overflow-hidden">
           <table className="w-full text-xs">
             <thead className="bg-muted border-b border-border">
               <tr>
@@ -496,7 +557,7 @@ function ClaimStatus({ emails }: { emails: string[] }) {
             <tbody className="divide-y divide-border">
               {data.details.map(d => (
                 <tr key={d.email} className={d.claimed ? 'bg-green-500/5' : ''}>
-                  <td className="px-3 py-1.5 font-mono truncate max-w-[180px]" title={d.email}>{d.email}</td>
+                  <td className="px-3 py-1.5 font-mono truncate max-w-45" title={d.email}>{d.email}</td>
                   <td className="px-3 py-1.5">
                     {d.claimed ? (
                       <span className="flex items-center gap-1 text-green-600 dark:text-green-400 font-medium">
@@ -508,9 +569,7 @@ function ClaimStatus({ emails }: { emails: string[] }) {
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-1.5 text-muted-foreground">
-                    {d.claimed_by ?? '—'}
-                  </td>
+                  <td className="px-3 py-1.5 text-muted-foreground">{d.claimed_by ?? '—'}</td>
                 </tr>
               ))}
             </tbody>
