@@ -31,8 +31,7 @@ export default async function AdminEmailLogPage() {
     .from('events_log')
     .select('id, created_at, metadata')
     .eq('type', 'email_sent')
-    .order('created_at', { ascending: false })
-    .limit(5000) as { data: EmailLogRow[] | null }
+    .order('created_at', { ascending: false }) as { data: EmailLogRow[] | null }
 
   const emails = rows ?? []
   const sentCount   = emails.filter(e => e.metadata?.status === 'sent').length

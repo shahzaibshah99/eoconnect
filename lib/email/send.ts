@@ -52,7 +52,7 @@ export async function sendEmail(opts: {
   const t = getTransport()
   if (!t) {
     console.warn(`[email] skipped — SMTP_HOST not configured (would send "${opts.subject}" to ${opts.to})`)
-    void logEmailEvent({ to: opts.to, subject: opts.subject, status: 'skipped', error: 'SMTP not configured' })
+    void logEmailEvent({ to: opts.to, subject: opts.subject, status: 'skipped', error: 'SMTP not configured', html: opts.html })
     return { ok: false, error: 'SMTP not configured' }
   }
   try {
@@ -63,12 +63,12 @@ export async function sendEmail(opts: {
       html: opts.html,
       replyTo: opts.replyTo,
     })
-    void logEmailEvent({ to: opts.to, subject: opts.subject, status: 'sent' })
+    void logEmailEvent({ to: opts.to, subject: opts.subject, status: 'sent', html: opts.html })
     return { ok: true }
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : 'unknown'
     console.error('[email] send failed:', err)
-    void logEmailEvent({ to: opts.to, subject: opts.subject, status: 'failed', error: errorMsg })
+    void logEmailEvent({ to: opts.to, subject: opts.subject, status: 'failed', error: errorMsg, html: opts.html })
     return { ok: false, error: errorMsg }
   }
 }
@@ -78,6 +78,7 @@ async function logEmailEvent(data: {
   subject: string
   status: 'sent' | 'failed' | 'skipped'
   error?: string
+  html?: string
 }) {
   try {
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY || !process.env.NEXT_PUBLIC_SUPABASE_URL) return
@@ -94,6 +95,7 @@ async function logEmailEvent(data: {
         subject: data.subject,
         status: data.status,
         error: data.error ?? null,
+        html: data.html ?? null,
       },
       tenant_id: 'eo',
     })
