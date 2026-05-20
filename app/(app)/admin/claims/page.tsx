@@ -42,7 +42,7 @@ export default async function AdminClaimsPage() {
     `)
     .eq('is_pre_populated', true)
     .order('created_at', { ascending: false })
-    .limit(500) as { data: ClaimRow[] | null }
+    .limit(5000) as { data: ClaimRow[] | null }
 
   const listings = rows ?? []
   const claimed   = listings.filter(l => l.claimed_at)

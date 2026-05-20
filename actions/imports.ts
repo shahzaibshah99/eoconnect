@@ -545,11 +545,15 @@ export async function getImportClaimStatus(emails: string[]): Promise<{
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = svc as any
 
+  // Fetch all pre-populated businesses and filter in JS.
+  // Avoid .in('email', 900+ values) which exceeds PostgREST's URL length limit
+  // and silently returns an empty result set.
+  const emailSet = new Set(emails.map(e => e.toLowerCase()))
   const { data: businesses } = await db
     .from('businesses')
     .select('email, claimed_at, owner_id, profiles!owner_id(full_name)')
-    .in('email', emails.map(e => e.toLowerCase()))
-    .eq('is_pre_populated', true) as {
+    .eq('is_pre_populated', true)
+    .limit(10000) as {
     data: Array<{
       email: string
       claimed_at: string | null
@@ -558,16 +562,21 @@ export async function getImportClaimStatus(emails: string[]): Promise<{
     }> | null
   }
 
-  const bizMap = new Map((businesses ?? []).map(b => [b.email?.toLowerCase(), b]))
-  const details = emails.map(email => {
-    const biz = bizMap.get(email.toLowerCase())
-    return {
-      email,
-      claimed: !!biz?.claimed_at,
-      claimed_by: biz?.profiles?.full_name ?? null,
-      claimed_at: biz?.claimed_at ?? null,
-    }
-  })
+  // Only keep businesses whose email matches one of this import's CSV rows.
+  const relevant = (businesses ?? []).filter(b => emailSet.has(b.email?.toLowerCase() ?? ''))
+  const bizMap = new Map(relevant.map(b => [b.email?.toLowerCase(), b]))
+
+  const details = emails
+    .filter(email => bizMap.has(email.toLowerCase()))
+    .map(email => {
+      const biz = bizMap.get(email.toLowerCase())!
+      return {
+        email,
+        claimed: !!biz.claimed_at,
+        claimed_by: biz.profiles?.full_name ?? null,
+        claimed_at: biz.claimed_at ?? null,
+      }
+    })
 
   return {
     error: null,

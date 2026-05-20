@@ -73,6 +73,7 @@ interface SearchPageProps {
   searchParams: Promise<SearchParams>
 }
 
+
 async function SearchResults({ searchParams }: SearchPageProps) {
   const params = await searchParams
   // Runtime diagnostic: is OPENAI_API_KEY actually in process.env on
@@ -192,6 +193,7 @@ async function SearchResults({ searchParams }: SearchPageProps) {
   }
 
   let results: Business[] = []
+  let totalCount: number | null = null
   const queryText = params.q?.trim()
   const tierCounts: Record<string, number> = {}
 
@@ -373,12 +375,13 @@ async function SearchResults({ searchParams }: SearchPageProps) {
       },
     }))
   } else {
-    // No query — list mode. Fetch and rank by tier → endorsements → recency.
-    // Cap at 100 so ranking has enough candidates to work with before slicing.
-    const { data: rows } = await buildBase()
+    // No query — show all listings ranked by tier → endorsements → recency.
+    const { data: rows, count } = await buildBase()
+      .select('*', { count: 'exact' })
       .order('created_at', { ascending: false })
-      .limit(100) as { data: Business[] | null }
+      .limit(2000) as { data: Business[] | null; count: number | null }
     results = rows ?? []
+    totalCount = count
   }
 
   // ── Sort / Ranking ──────────────────────────────────────────
@@ -515,7 +518,9 @@ async function SearchResults({ searchParams }: SearchPageProps) {
         )}
         <div className="flex items-center justify-between mb-4">
           <p className="text-sm text-muted-foreground">
-            Showing <span className="font-semibold text-foreground">{results.length}</span> results
+            Showing <span className="font-semibold text-foreground">
+              {totalCount ?? results.length}
+            </span> {queryText ? 'results' : 'listings'}
             {queryText && <> for <span className="font-semibold text-foreground">&ldquo;{queryText}&rdquo;</span></>}
           </p>
         </div>
@@ -566,6 +571,7 @@ async function SearchResults({ searchParams }: SearchPageProps) {
             <p className="text-sm text-muted-foreground mt-1">Try a different keyword or remove filters</p>
           </div>
         )}
+
       </div>
     </div>
   )

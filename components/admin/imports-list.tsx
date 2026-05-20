@@ -478,7 +478,7 @@ function ClaimStatus({ emails }: { emails: string[] }) {
         Claim status
         {data && (
           <span className="ml-1 font-medium text-green-600 dark:text-green-400">
-            {data.claimed}/{emails.length} claimed
+            {data.claimed}/{data.claimed + data.pending} claimed
           </span>
         )}
       </button>
