@@ -9,6 +9,7 @@ import { siteUrl } from '@/lib/site-url'
 import { currentTenant, type TenantId } from '@/lib/tenant'
 import { scrapeProfileForMembership } from '@/lib/linkedin-verification-scrape'
 import { notifyMember } from '@/lib/verification-gate'
+import { isAssignableTag, assignableTagsForTenant, type AssignableTag } from '@/lib/verification-tags'
 
 /**
  * Member-side verification submission.
@@ -44,6 +45,10 @@ const SubmitSchema = z.object({
     .refine(u => /(^|\.)linkedin\.com$/i.test(new URL(u).hostname), 'Must be a linkedin.com URL')
     .optional()
     .or(z.literal('').transform(() => undefined)),
+  // The tag the member is claiming (e.g. eo_member, eo_alumni). Optional
+  // for backwards-compat but validated against the tenant's allowed tags
+  // when provided.
+  claimed_tag: z.string().optional(),
 })
 
 export async function submitVerification(formData: FormData): Promise<{ error: string | null }> {
@@ -57,6 +62,7 @@ export async function submitVerification(formData: FormData): Promise<{ error: s
   const parsed = SubmitSchema.safeParse({
     screenshot_url: formData.get('screenshot_url'),
     linkedin_url: formData.get('linkedin_url') || undefined,
+    claimed_tag: formData.get('claimed_tag') || undefined,
   })
   if (!parsed.success) return { error: parsed.error.issues[0].message }
 
@@ -95,12 +101,23 @@ export async function submitVerification(formData: FormData): Promise<{ error: s
   }
 
   const tenantId = (profile?.tenant_id ?? currentTenant()) as TenantId
+
+  // Validate claimed_tag belongs to the tenant's allowed set.
+  let claimedTag: AssignableTag | null = null
+  if (parsed.data.claimed_tag) {
+    const allowed = assignableTagsForTenant(tenantId)
+    if (isAssignableTag(parsed.data.claimed_tag) && allowed.includes(parsed.data.claimed_tag as AssignableTag)) {
+      claimedTag = parsed.data.claimed_tag as AssignableTag
+    }
+  }
+
   const { data: inserted, error } = await db.from('verifications').insert({
     member_id: user.id,
     tenant_id: tenantId,
     method: 'screenshot',
     screenshot_url: parsed.data.screenshot_url,
     linkedin_url: parsed.data.linkedin_url ?? null,
+    claimed_tag: claimedTag,
     // linkedin_signal stays null until the scrape worker (or an admin
     // override) fills it in.
     status: 'pending',

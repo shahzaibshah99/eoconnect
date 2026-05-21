@@ -65,7 +65,7 @@ export default async function VerifyMembershipPage() {
       <header>
         <h1 className="text-2xl font-bold">Verify your membership</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Submit a screenshot of your EO or YPO member profile page. An admin reviews and assigns your verification tag.
+          Current members and alumni can both verify. Select your membership type and upload your proof — an admin reviews and assigns your tag.
         </p>
       </header>
 
@@ -180,12 +180,16 @@ function TrustNotes() {
   return (
     <div className="text-xs text-muted-foreground space-y-1.5 pt-2 border-t border-border">
       <p>
-        <strong className="text-foreground">What we accept:</strong>{' '}
-        A screenshot of your EO or YPO member network profile page showing your name and chapter. Crop sensitive personal info if you wish — the admin only needs to see the membership signal.
+        <strong className="text-foreground">Current members:</strong>{' '}
+        Upload a screenshot of your EO or YPO member network profile page showing your name and chapter.
+      </p>
+      <p>
+        <strong className="text-foreground">Alumni:</strong>{' '}
+        Upload a screenshot of EO/YPO correspondence, a past membership dues invoice, or any official document confirming previous membership.
       </p>
       <p>
         <strong className="text-foreground">LinkedIn:</strong>{' '}
-        Optional. We&apos;ll use your LinkedIn page as a supporting signal. We never auto-approve based on LinkedIn alone — a human admin always reviews.
+        Optional. Used as a supporting signal during review. A human admin always makes the final call.
       </p>
     </div>
   )

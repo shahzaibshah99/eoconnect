@@ -43,6 +43,7 @@ export interface VerificationRow {
   rejection_reason: string | null
   reviewed_at: string | null
   created_at: string
+  claimed_tag: AssignableTag | null
   profiles: {
     full_name: string | null
     avatar_url: string | null
@@ -174,6 +175,11 @@ function VerificationItem({ row }: { row: VerificationRow }) {
               <Badge className={cn('border capitalize text-[10px]', STATUS_VARIANTS[row.status])}>
                 {row.status}
               </Badge>
+              {row.claimed_tag && (
+                <Badge variant="outline" className="text-[10px] bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20">
+                  Claims: {VERIFICATION_TAG_LABEL[row.claimed_tag]}
+                </Badge>
+              )}
               {p?.verification_tag && p.verification_tag !== 'unverified' && (
                 <Badge variant="secondary" className="text-[10px]">
                   Current: {VERIFICATION_TAG_LABEL[p.verification_tag]}
@@ -391,7 +397,9 @@ function ApproveDialog({
   // profile's value — that's the canonical source for tag vocabulary.
   const tenant = row.profiles?.tenant_id ?? row.tenant_id
   const tags = assignableTagsForTenant(tenant)
-  const [tag, setTag] = useState<AssignableTag>(tags[0])
+  // Pre-select the tag the member claimed; fall back to first in list.
+  const defaultTag = row.claimed_tag && tags.includes(row.claimed_tag) ? row.claimed_tag : tags[0]
+  const [tag, setTag] = useState<AssignableTag>(defaultTag)
   const [error, setError] = useState<string | null>(null)
 
   const submit = () => {

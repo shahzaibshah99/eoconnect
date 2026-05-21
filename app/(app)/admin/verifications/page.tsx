@@ -31,6 +31,7 @@ export default async function AdminVerificationsPage() {
     .select(`
       id, member_id, tenant_id, method, screenshot_url, linkedin_url,
       linkedin_signal, status, rejection_reason, reviewed_at, created_at,
+      claimed_tag,
       profiles!member_id (
         full_name, avatar_url, eo_chapter, eo_membership_email,
         verification_tag, tenant_id

@@ -10,26 +10,60 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Upload, X, ImageIcon } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import type { AssignableTag } from '@/lib/verification-tags'
 
-const MAX_BYTES = 5 * 1024 * 1024 // 5 MB — screenshots shouldn't be huge
+const MAX_BYTES = 5 * 1024 * 1024
 const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/webp']
+
+interface MembershipOption {
+  tag: AssignableTag
+  label: string
+  description: string
+  screenshotHint: string
+}
+
+function getMembershipOptions(tenantId: string): MembershipOption[] {
+  if (tenantId === 'ypo') {
+    return [
+      {
+        tag: 'ypo_member',
+        label: 'Current YPO Member',
+        description: 'You are an active YPO member.',
+        screenshotHint: 'Take a screenshot of your YPO member profile page showing your name and chapter.',
+      },
+      {
+        tag: 'ypo_alumni',
+        label: 'YPO Alumni',
+        description: 'You were previously a YPO member.',
+        screenshotHint: 'Upload a screenshot of YPO correspondence, a past membership dues invoice, or any official document confirming your previous membership.',
+      },
+    ]
+  }
+  return [
+    {
+      tag: 'eo_member',
+      label: 'Current EO Member',
+      description: 'You are an active EO member.',
+      screenshotHint: 'Take a screenshot of your EO member profile page showing your name and chapter.',
+    },
+    {
+      tag: 'eo_alumni',
+      label: 'EO Alumni',
+      description: 'You were previously an EO member.',
+      screenshotHint: 'Upload a screenshot of EO correspondence, a past membership dues invoice, or any official document confirming your previous membership.',
+    },
+  ]
+}
 
 interface Props {
   tenantId: string
 }
 
-/**
- * Two-step submission: client-side image upload to the existing
- * 'eoconnect-media' bucket (matches the business profile wizard
- * pattern), then a server action that records the verification row.
- *
- * Why client-side upload: server actions in Next have a default body
- * size limit and shipping the screenshot through the action would force
- * us to either bump the limit or stream — using direct browser → Supabase
- * upload sidesteps both. The action only sees the resulting URL.
- */
 export function VerificationSubmissionForm({ tenantId }: Props) {
   const router = useRouter()
+  const options = getMembershipOptions(tenantId)
+  const [selectedOption, setSelectedOption] = useState<MembershipOption>(options[0])
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
   const [linkedin, setLinkedin] = useState('')
@@ -88,6 +122,7 @@ export function VerificationSubmissionForm({ tenantId }: Props) {
     startTransition(async () => {
       const fd = new FormData()
       fd.set('screenshot_url', screenshotUrl)
+      fd.set('claimed_tag', selectedOption.tag)
       if (linkedin.trim()) fd.set('linkedin_url', linkedin.trim())
 
       const res = await submitVerification(fd)
@@ -115,9 +150,34 @@ export function VerificationSubmissionForm({ tenantId }: Props) {
         </p>
       </div>
 
+      {/* Membership type selector */}
+      <div className="space-y-2">
+        <Label>Membership type <span className="text-destructive">*</span></Label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {options.map(opt => (
+            <button
+              key={opt.tag}
+              type="button"
+              disabled={busy}
+              onClick={() => setSelectedOption(opt)}
+              className={cn(
+                'text-left p-3 rounded-lg border-2 transition-colors',
+                selectedOption.tag === opt.tag
+                  ? 'border-primary bg-primary/5'
+                  : 'border-border hover:border-border/80 hover:bg-muted/30',
+                busy && 'opacity-50 cursor-not-allowed'
+              )}
+            >
+              <p className="font-medium text-sm">{opt.label}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{opt.description}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Screenshot picker */}
       <div className="space-y-2">
-        <Label>Screenshot of member profile <span className="text-destructive">*</span></Label>
+        <Label>Proof of membership <span className="text-destructive">*</span></Label>
         {preview ? (
           <div className="relative inline-block">
             <Image
@@ -147,7 +207,7 @@ export function VerificationSubmissionForm({ tenantId }: Props) {
           >
             <div className="flex flex-col items-center gap-2 text-muted-foreground">
               <Upload className="h-6 w-6" />
-              <p className="text-sm font-medium">Click to upload a screenshot</p>
+              <p className="text-sm font-medium">Click to upload</p>
               <p className="text-xs">PNG, JPEG, or WebP up to 5 MB</p>
             </div>
           </button>
@@ -161,7 +221,7 @@ export function VerificationSubmissionForm({ tenantId }: Props) {
         />
         <p className="text-xs text-muted-foreground flex items-start gap-1.5">
           <ImageIcon className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-          <span>Take a screenshot of your EO/YPO member profile page that shows your name and chapter. Crop anything sensitive — admin just needs the membership signal.</span>
+          <span>{selectedOption.screenshotHint} Crop anything sensitive — admin just needs the membership signal.</span>
         </p>
       </div>
 
