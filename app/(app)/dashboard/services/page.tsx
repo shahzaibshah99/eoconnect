@@ -35,6 +35,9 @@ export default async function ListingsPage() {
   if (bizList.length === 0) {
     return (
       <div className="max-w-3xl mx-auto">
+        <Link href="/dashboard" className="text-xs text-muted-foreground hover:text-foreground hover:underline mb-3 inline-block">
+          ← Business Dashboard
+        </Link>
         <h1 className="text-2xl font-bold mb-2">Manage Services</h1>
         <div className="bg-card border border-border rounded-2xl p-8 text-center mt-6">
           <h2 className="text-lg font-semibold mb-2">No business profile yet</h2>
@@ -69,6 +72,9 @@ export default async function ListingsPage() {
     <div className="max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-8">
         <div>
+          <Link href="/dashboard" className="text-xs text-muted-foreground hover:text-foreground hover:underline mb-1 inline-block">
+            ← Business Dashboard
+          </Link>
           <h1 className="text-2xl font-bold">Manage Services</h1>
           <p className="text-sm text-muted-foreground mt-1">
             {bizList.length} business{bizList.length === 1 ? '' : 'es'} · {services?.length ?? 0} service{(services?.length ?? 0) === 1 ? '' : 's'}
