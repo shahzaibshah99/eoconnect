@@ -1,17 +1,18 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { setMemberStatus, setMemberRole, setChapterAdminScope } from '@/actions/admin'
+import { setMemberStatus, setMemberRole, setChapterAdminScope, manualVerifyMember } from '@/actions/admin'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { ChapterPicker, type Chapter } from '@/components/forms/chapter-picker'
 import { describeChapterScope } from '@/lib/chapter-scope'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ShieldCheck, Ban, Archive, ArchiveRestore, UserCheck, CheckCircle } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { VERIFICATION_TAG_LABEL, type AssignableTag } from '@/lib/verification-tags'
 
 type Status = 'pending' | 'active' | 'suspended' | 'archived'
 type Role = 'member' | 'chapter_admin' | 'super_admin'
@@ -27,6 +28,7 @@ interface Member {
   admin_scope_country: string | null
   admin_scope_city: string | null
   avatar_url: string | null
+  verification_tag: string
 }
 
 const STATUS_VARIANTS: Record<Status, string> = {
@@ -40,13 +42,15 @@ interface MembersTableProps {
   members: Member[]
   canChangeRole: boolean
   chapters: Chapter[]
+  assignableTags: AssignableTag[]
 }
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100] as const
 type PageSize = typeof PAGE_SIZE_OPTIONS[number]
 
-export function MembersTable({ members, canChangeRole, chapters }: MembersTableProps) {
+export function MembersTable({ members, canChangeRole, chapters, assignableTags }: MembersTableProps) {
   const [filter, setFilter] = useState<'all' | Status>('all')
+  const [tagFilter, setTagFilter] = useState<'all' | 'unverified' | AssignableTag>('all')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState<PageSize>(50)
@@ -57,6 +61,11 @@ export function MembersTable({ members, canChangeRole, chapters }: MembersTableP
   const base = filter === 'archived' ? archived : nonArchived
   const filtered = base.filter(m => {
     if (filter !== 'all' && filter !== 'archived' && m.status !== filter) return false
+    if (tagFilter !== 'all') {
+      const isUnverified = !m.verification_tag || m.verification_tag === 'unverified'
+      if (tagFilter === 'unverified' && !isUnverified) return false
+      if (tagFilter !== 'unverified' && m.verification_tag !== tagFilter) return false
+    }
     if (search) {
       const q = search.toLowerCase()
       return m.full_name.toLowerCase().includes(q) || m.eo_chapter?.toLowerCase().includes(q) || m.eo_membership_email?.toLowerCase().includes(q)
@@ -72,31 +81,63 @@ export function MembersTable({ members, canChangeRole, chapters }: MembersTableP
     setPage(0)
   }
 
+  const handleTagFilterChange = (f: typeof tagFilter) => {
+    setTagFilter(f)
+    setPage(0)
+  }
+
   const handleSearch = (q: string) => {
     setSearch(q)
     setPage(0)
   }
 
+  const unverifiedCount = nonArchived.filter(m => !m.verification_tag || m.verification_tag === 'unverified').length
+
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
-      <div className="p-4 border-b border-border flex flex-col sm:flex-row gap-3">
-        <input
-          placeholder="Search by name, email, chapter…"
-          value={search}
-          onChange={e => handleSearch(e.target.value)}
-          className="flex-1 h-9 px-3 rounded-lg bg-background border border-border text-sm"
-        />
+      <div className="p-4 border-b border-border flex flex-col gap-3">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <input
+            placeholder="Search by name, email, chapter…"
+            value={search}
+            onChange={e => handleSearch(e.target.value)}
+            className="flex-1 h-9 px-3 rounded-lg bg-background border border-border text-sm"
+          />
+          <div className="flex gap-1 flex-wrap">
+            {(['all', 'pending', 'active', 'suspended', 'archived'] as const).map(s => (
+              <button
+                key={s}
+                onClick={() => handleFilterChange(s)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-xs font-medium capitalize',
+                  filter === s ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'
+                )}
+              >
+                {s === 'all' ? `all (${nonArchived.length})` : s === 'archived' ? `archived (${archived.length})` : `${s} (${nonArchived.filter(m => m.status === s).length})`}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="flex gap-1 flex-wrap">
-          {(['all', 'pending', 'active', 'suspended', 'archived'] as const).map(s => (
+          <button
+            onClick={() => handleTagFilterChange('all')}
+            className={cn('px-3 py-1.5 rounded-lg text-xs font-medium', tagFilter === 'all' ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80')}
+          >
+            All types
+          </button>
+          <button
+            onClick={() => handleTagFilterChange('unverified')}
+            className={cn('px-3 py-1.5 rounded-lg text-xs font-medium', tagFilter === 'unverified' ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80')}
+          >
+            Unverified ({unverifiedCount})
+          </button>
+          {assignableTags.map(t => (
             <button
-              key={s}
-              onClick={() => handleFilterChange(s)}
-              className={cn(
-                'px-3 py-1.5 rounded-lg text-xs font-medium capitalize',
-                filter === s ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'
-              )}
+              key={t}
+              onClick={() => handleTagFilterChange(t)}
+              className={cn('px-3 py-1.5 rounded-lg text-xs font-medium', tagFilter === t ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80')}
             >
-              {s === 'all' ? `all (${nonArchived.length})` : s === 'archived' ? `archived (${archived.length})` : `${s} (${nonArchived.filter(m => m.status === s).length})`}
+              {VERIFICATION_TAG_LABEL[t]} ({nonArchived.filter(m => m.verification_tag === t).length})
             </button>
           ))}
         </div>
@@ -115,7 +156,7 @@ export function MembersTable({ members, canChangeRole, chapters }: MembersTableP
           </thead>
           <tbody>
             {paginated.map(m => (
-              <MemberRow key={m.id} member={m} canChangeRole={canChangeRole} chapters={chapters} />
+              <MemberRow key={m.id} member={m} canChangeRole={canChangeRole} chapters={chapters} assignableTags={assignableTags} />
             ))}
             {paginated.length === 0 && (
               <tr>
@@ -155,7 +196,7 @@ export function MembersTable({ members, canChangeRole, chapters }: MembersTableP
   )
 }
 
-function MemberRow({ member, canChangeRole, chapters }: { member: Member; canChangeRole: boolean; chapters: Chapter[] }) {
+function MemberRow({ member, canChangeRole, chapters, assignableTags }: { member: Member; canChangeRole: boolean; chapters: Chapter[]; assignableTags: AssignableTag[] }) {
   const [isPending, startTransition] = useTransition()
   const [scopeDialogOpen, setScopeDialogOpen] = useState(false)
 
@@ -172,6 +213,7 @@ function MemberRow({ member, canChangeRole, chapters }: { member: Member; canCha
   }
 
   const isArchived = member.status === 'archived'
+  const isUnverified = !member.verification_tag || member.verification_tag === 'unverified'
 
   return (
     <>
@@ -188,6 +230,12 @@ function MemberRow({ member, canChangeRole, chapters }: { member: Member; canCha
               <p className="font-medium">{member.full_name}</p>
               {member.eo_membership_email && (
                 <p className="text-xs text-muted-foreground truncate">{member.eo_membership_email}</p>
+              )}
+              {!isUnverified && (
+                <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-700 dark:text-green-400 font-medium mt-0.5">
+                  <CheckCircle className="h-2.5 w-2.5" />
+                  {VERIFICATION_TAG_LABEL[member.verification_tag as AssignableTag] ?? member.verification_tag}
+                </span>
               )}
             </div>
           </div>
@@ -225,28 +273,49 @@ function MemberRow({ member, canChangeRole, chapters }: { member: Member; canCha
           {format(new Date(member.created_at), 'MMM d, yyyy')}
         </td>
         <td className="p-3">
-          <div className="flex items-center justify-end gap-1">
+          <div className="flex items-center justify-end gap-0.5">
+            {!isArchived && canChangeRole && isUnverified && (
+              <VerifyMemberDialog member={member} assignableTags={assignableTags} />
+            )}
             {isArchived ? (
-              <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('suspended')}>
-                Unarchive
-              </Button>
+              <button
+                title="Unarchive"
+                disabled={isPending}
+                onClick={() => changeStatus('suspended')}
+                className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-muted disabled:opacity-30 transition-colors"
+              >
+                <ArchiveRestore className="h-3.5 w-3.5" />
+              </button>
             ) : (
               <>
                 {member.status !== 'active' && (
-                  <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('active')}>
-                    Approve
-                  </Button>
+                  <button
+                    title="Approve"
+                    disabled={isPending}
+                    onClick={() => changeStatus('active')}
+                    className="h-7 w-7 rounded-md flex items-center justify-center text-green-600 dark:text-green-400 hover:bg-green-500/10 disabled:opacity-30 transition-colors"
+                  >
+                    <UserCheck className="h-3.5 w-3.5" />
+                  </button>
                 )}
                 {member.status !== 'suspended' && (
-                  <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('suspended')}
-                    className="text-destructive border-destructive/30 hover:bg-destructive/5 hover:text-destructive">
-                    Suspend
-                  </Button>
+                  <button
+                    title="Suspend"
+                    disabled={isPending}
+                    onClick={() => changeStatus('suspended')}
+                    className="h-7 w-7 rounded-md flex items-center justify-center text-destructive hover:bg-destructive/10 disabled:opacity-30 transition-colors"
+                  >
+                    <Ban className="h-3.5 w-3.5" />
+                  </button>
                 )}
-                <Button size="sm" variant="outline" disabled={isPending} onClick={() => changeStatus('archived')}
-                  className="text-muted-foreground hover:text-foreground">
-                  Archive
-                </Button>
+                <button
+                  title="Archive"
+                  disabled={isPending}
+                  onClick={() => changeStatus('archived')}
+                  className="h-7 w-7 rounded-md flex items-center justify-center text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 disabled:opacity-30 transition-colors"
+                >
+                  <Archive className="h-3.5 w-3.5" />
+                </button>
               </>
             )}
           </div>
@@ -259,6 +328,62 @@ function MemberRow({ member, canChangeRole, chapters }: { member: Member; canCha
         chapters={chapters}
       />
     </>
+  )
+}
+
+function VerifyMemberDialog({ member, assignableTags }: { member: Member; assignableTags: AssignableTag[] }) {
+  const [open, setOpen] = useState(false)
+  const [tag, setTag] = useState<AssignableTag>(assignableTags[0])
+  const [isPending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+
+  const save = () => {
+    setError(null)
+    startTransition(async () => {
+      const res = await manualVerifyMember(member.id, tag)
+      if (res.error) setError(res.error)
+      else setOpen(false)
+    })
+  }
+
+  if (assignableTags.length === 0) return null
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger render={<button title="Verify member" className="h-7 w-7 rounded-md flex items-center justify-center text-green-600 dark:text-green-400 hover:bg-green-500/10 transition-colors" />}>
+        <ShieldCheck className="h-3.5 w-3.5" />
+      </DialogTrigger>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Manually verify {member.full_name}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <p className="text-sm text-muted-foreground">
+            Bypasses the normal verification form. Use for known members you can vouch for directly.
+          </p>
+          <div className="space-y-2">
+            <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground block">
+              Assign tag
+            </label>
+            <Select value={tag} onValueChange={(v: string | null) => v && setTag(v as AssignableTag)}>
+              <SelectTrigger className="w-full h-10"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {assignableTags.map(t => (
+                  <SelectItem key={t} value={t}>{VERIFICATION_TAG_LABEL[t]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={isPending}>Cancel</Button>
+          <Button onClick={save} disabled={isPending}>
+            {isPending ? 'Verifying…' : 'Verify member'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

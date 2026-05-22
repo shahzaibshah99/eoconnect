@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Upload } from 'lucide-react'
 import { updateProfile } from '@/actions/profile'
 import { ChapterPicker, type Chapter } from '@/components/forms/chapter-picker'
+import { cn } from '@/lib/utils'
 
 // Map raw membership_type values stored in the DB to display labels.
 // base-ui's Select renders the raw value by default; without this mapping
@@ -26,9 +27,11 @@ interface Props {
   defaultChapter: string
   defaultMembershipType: string
   defaultLinkedinUrl: string
+  defaultPhone: string
+  contactVisibility: { email: boolean; phone: boolean }
 }
 
-export function AccountForm({ chapters, currentAvatar, defaultName, defaultChapter, defaultMembershipType, defaultLinkedinUrl }: Props) {
+export function AccountForm({ chapters, currentAvatar, defaultName, defaultChapter, defaultMembershipType, defaultLinkedinUrl, defaultPhone, contactVisibility }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [isPending, startTransition] = useTransition()
@@ -39,6 +42,8 @@ export function AccountForm({ chapters, currentAvatar, defaultName, defaultChapt
   const [avatarPreview, setAvatarPreview] = useState<string | null>(currentAvatar)
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const avatarInputRef = useRef<HTMLInputElement>(null)
+  const [showEmail, setShowEmail] = useState(contactVisibility.email)
+  const [showPhone, setShowPhone] = useState(contactVisibility.phone)
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -62,6 +67,8 @@ export function AccountForm({ chapters, currentAvatar, defaultName, defaultChapt
     fd.set('chapter_country', chapter.country ?? '')
     fd.set('chapter_city', chapter.city ?? '')
     if (avatarFile) fd.set('avatar', avatarFile)
+    fd.set('contact_show_email', showEmail ? 'true' : 'false')
+    fd.set('contact_show_phone', showPhone ? 'true' : 'false')
     startTransition(async () => {
       const result = await updateProfile(fd)
       if (result.error) setError(result.error)
@@ -89,7 +96,7 @@ export function AccountForm({ chapters, currentAvatar, defaultName, defaultChapt
         <div className="flex items-center gap-4">
           <div
             onClick={() => avatarInputRef.current?.click()}
-            className="relative h-20 w-20 rounded-full border-2 border-border overflow-hidden flex-shrink-0 bg-muted cursor-pointer hover:border-primary transition-colors"
+            className="relative h-20 w-20 rounded-full border-2 border-border overflow-hidden shrink-0 bg-muted cursor-pointer hover:border-primary transition-colors"
           >
             {avatarPreview ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -158,6 +165,52 @@ export function AccountForm({ chapters, currentAvatar, defaultName, defaultChapt
         <p className="text-xs text-muted-foreground">
           Shown next to your name on listings so members can connect.
         </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="phone">
+          Phone <span className="text-muted-foreground text-xs">(optional)</span>
+        </Label>
+        <Input
+          id="phone"
+          name="phone"
+          type="tel"
+          defaultValue={defaultPhone}
+          placeholder="+1 (555) 123-4567"
+        />
+      </div>
+
+      <div className="space-y-3">
+        <Label>Contact Visibility</Label>
+        <p className="text-xs text-muted-foreground">
+          Choose what other members can see on your business listings.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setShowEmail(v => !v)}
+            className={cn(
+              'px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+              showEmail
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-muted hover:bg-muted/80 border-transparent'
+            )}
+          >
+            {showEmail ? '✓ ' : ''}Show email publicly
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowPhone(v => !v)}
+            className={cn(
+              'px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+              showPhone
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-muted hover:bg-muted/80 border-transparent'
+            )}
+          >
+            {showPhone ? '✓ ' : ''}Show phone publicly
+          </button>
+        </div>
       </div>
 
       <Button type="submit" disabled={isPending || !membershipType || !chapter} className="w-full bg-primary text-primary-foreground font-bold">

@@ -54,7 +54,7 @@ export default async function ListingDetailPage({ params }: ListingDetailProps) 
   const db = supabase as any
 
   const [{ data: business }, { data: services }, { data: categories }, { data: endorsements }] = await Promise.all([
-    db.from('businesses').select('*, profiles!owner_id(full_name, avatar_url, eo_chapter, eo_membership_type, linkedin_url)').eq('id', listingId).eq('status', 'published').single(),
+    db.from('businesses').select('*, profiles!owner_id(full_name, avatar_url, eo_chapter, eo_membership_type, linkedin_url, eo_membership_email, phone, contact_visibility)').eq('id', listingId).eq('status', 'published').single(),
     db.from('services').select('*').eq('business_id', listingId).eq('status', 'published'),
     supabase.from('categories').select('id, name').eq('active', true),
     db.from('endorsements')
@@ -159,21 +159,15 @@ export default async function ListingDetailPage({ params }: ListingDetailProps) 
         <div className="w-full md:w-72 flex-shrink-0 space-y-4">
           <div className="bg-card border border-border rounded-xl p-5 space-y-3">
             {!isOwner && (
-              services && services.length > 0 ? (
-                <InquiryDialog
-                  businessId={business.id}
-                  ownerId={business.owner_id}
-                  ownerName={business.profiles?.full_name ?? 'the owner'}
-                  businessName={business.name}
-                  services={(services as Array<{ id: string; title: string; item_type?: string | null }>).map(s => ({
-                    id: s.id, title: s.title, item_type: s.item_type ?? null,
-                  }))}
-                />
-              ) : (
-                <p className="text-xs text-muted-foreground text-center px-2 py-3 border border-dashed border-border rounded-lg">
-                  This member hasn&apos;t listed any services yet.
-                </p>
-              )
+              <InquiryDialog
+                businessId={business.id}
+                ownerId={business.owner_id ?? ''}
+                ownerName={business.profiles?.full_name ?? 'the owner'}
+                businessName={business.name}
+                services={(services ?? []).map((s: { id: string; title: string; item_type?: string | null }) => ({
+                  id: s.id, title: s.title, item_type: s.item_type ?? null,
+                }))}
+              />
             )}
             {/* Flag this listing — per scope F06. Hidden from the listing owner. */}
             {user && !isOwner && (
@@ -297,6 +291,25 @@ export default async function ListingDetailPage({ params }: ListingDetailProps) 
                       <span className="text-xs text-muted-foreground">{business.profiles.eo_chapter}</span>
                     )}
                   </div>
+                  {(() => {
+                    const cv = business.profiles.contact_visibility as { email?: boolean; phone?: boolean } | null
+                    return (
+                      <div className="space-y-1 mt-1.5">
+                        {cv?.email && business.profiles.eo_membership_email && (
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <Mail className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{business.profiles.eo_membership_email}</span>
+                          </div>
+                        )}
+                        {cv?.phone && business.profiles.phone && (
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <Phone className="h-3 w-3 shrink-0" />
+                            <span>{business.profiles.phone}</span>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
               </div>
             </div>

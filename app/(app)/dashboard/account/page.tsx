@@ -14,11 +14,19 @@ export default async function AccountPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = supabase as any
+  const { data: profile } = await db
     .from('profiles')
-    .select('id, full_name, avatar_url, eo_chapter, eo_membership_type, linkedin_url')
+    .select('id, full_name, avatar_url, eo_chapter, eo_membership_type, linkedin_url, phone, contact_visibility')
     .eq('id', user.id)
-    .single() as { data: (Pick<Profile, 'id' | 'full_name' | 'avatar_url' | 'eo_chapter' | 'eo_membership_type'> & { linkedin_url: string | null }) | null }
+    .single() as { data: (Pick<Profile, 'id' | 'full_name' | 'avatar_url' | 'eo_chapter' | 'eo_membership_type'> & {
+      linkedin_url: string | null
+      phone: string | null
+      contact_visibility: { email: boolean; phone: boolean } | null
+    }) | null }
+
+  const contactVisibility = profile?.contact_visibility ?? { email: false, phone: false }
 
   return (
     <div className="max-w-xl mx-auto">
@@ -35,6 +43,8 @@ export default async function AccountPage() {
         defaultChapter={profile?.eo_chapter ?? ''}
         defaultMembershipType={profile?.eo_membership_type ?? ''}
         defaultLinkedinUrl={profile?.linkedin_url ?? ''}
+        defaultPhone={profile?.phone ?? ''}
+        contactVisibility={contactVisibility}
       />
     </div>
   )

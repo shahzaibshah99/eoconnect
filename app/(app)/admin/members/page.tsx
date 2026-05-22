@@ -4,6 +4,8 @@ import { InvitedListingsTable } from '@/components/admin/invited-listings-table'
 import chaptersData from '@/lib/data/eo-chapters.json'
 import type { Chapter } from '@/components/forms/chapter-picker'
 import { describeChapterScope } from '@/lib/chapter-scope'
+import { assignableTagsForTenant } from '@/lib/verification-tags'
+import { currentTenant } from '@/lib/tenant'
 
 const CHAPTERS = chaptersData as Chapter[]
 
@@ -21,7 +23,7 @@ export default async function AdminMembersPage() {
     } | null
   }
 
-  let query = db.from('profiles').select('id, full_name, eo_chapter, role, status, created_at, eo_membership_email, admin_scope_country, admin_scope_city, chapter_country, chapter_city, avatar_url').order('created_at', { ascending: false })
+  let query = db.from('profiles').select('id, full_name, eo_chapter, role, status, created_at, eo_membership_email, admin_scope_country, admin_scope_city, chapter_country, chapter_city, avatar_url, verification_tag').order('created_at', { ascending: false })
   // Chapter admins only see members within their assigned scope.
   if (me?.role === 'chapter_admin' && me.admin_scope_country) {
     query = query.eq('chapter_country', me.admin_scope_country)
@@ -40,8 +42,11 @@ export default async function AdminMembersPage() {
       admin_scope_country: string | null
       admin_scope_city: string | null
       avatar_url: string | null
+      verification_tag: string
     }> | null
   }
+
+  const assignableTags = assignableTagsForTenant(currentTenant())
 
   // Invited = pre-populated listings that haven't been claimed yet
   const { data: invitedListings } = await db
@@ -82,6 +87,7 @@ export default async function AdminMembersPage() {
         members={members ?? []}
         canChangeRole={me?.role === 'super_admin'}
         chapters={CHAPTERS}
+        assignableTags={assignableTags}
       />
     </div>
   )

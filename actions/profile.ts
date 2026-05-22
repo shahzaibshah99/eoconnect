@@ -24,6 +24,9 @@ const ProfileSchema = z.object({
     /^https?:\/\/([a-z0-9-]+\.)?linkedin\.com\//i,
     'Must be a linkedin.com URL'
   ).or(z.literal(''))).optional(),
+  phone: z.string().trim().max(30).optional(),
+  contact_show_email: z.enum(['true', 'false']).optional(),
+  contact_show_phone: z.enum(['true', 'false']).optional(),
 })
 
 export async function updateProfile(formData: FormData): Promise<{ error: string | null }> {
@@ -41,6 +44,9 @@ export async function updateProfile(formData: FormData): Promise<{ error: string
     chapter_country: formData.get('chapter_country') || null,
     chapter_city: formData.get('chapter_city') || null,
     linkedin_url: formData.get('linkedin_url') ?? '',
+    phone: formData.get('phone') ?? undefined,
+    contact_show_email: formData.get('contact_show_email') ?? undefined,
+    contact_show_phone: formData.get('contact_show_phone') ?? undefined,
   })
   if (!parsed.success) return { error: parsed.error.issues[0].message }
 
@@ -64,6 +70,11 @@ export async function updateProfile(formData: FormData): Promise<{ error: string
     // Keep legacy `country` text in sync for back-compat with old reads.
     country: parsed.data.chapter_country || null,
     linkedin_url: parsed.data.linkedin_url || null,
+    phone: parsed.data.phone || null,
+    contact_visibility: {
+      email: parsed.data.contact_show_email === 'true',
+      phone: parsed.data.contact_show_phone === 'true',
+    },
   }
   if (avatar_url) update.avatar_url = avatar_url
 

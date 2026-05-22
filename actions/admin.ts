@@ -911,6 +911,79 @@ export async function setVerificationLinkedInSignal(
 }
 
 /**
+ * Manually verify a member without requiring them to submit the verification
+ * form. Used by super admins for known members (e.g. founders, chapter leads).
+ * Creates an approved verification record with method='chapter_manager' and
+ * cascades the tag to their profile and owned businesses.
+ */
+export async function manualVerifyMember(
+  memberId: string,
+  tag: AssignableTag
+): Promise<{ error: string | null }> {
+  const ctx = await requireSuperAdmin()
+  if (!ctx.ok) return { error: ctx.error ?? 'Not authorized' }
+  if (!isAssignableTag(tag)) return { error: 'Invalid verification tag' }
+
+  const svc = adminDb()
+
+  const { data: member } = await svc
+    .from('profiles')
+    .select('id')
+    .eq('id', memberId)
+    .maybeSingle() as { data: { id: string } | null }
+  if (!member) return { error: 'Member not found' }
+
+  const tenantId = tag.startsWith('eo_') ? 'eo' : 'ypo'
+
+  const { error: vErr } = await svc
+    .from('verifications')
+    .insert({
+      member_id: memberId,
+      tenant_id: tenantId,
+      method: 'chapter_manager',
+      status: 'approved',
+      reviewed_by: ctx.user!.id,
+      reviewed_at: new Date().toISOString(),
+    })
+  if (vErr) return { error: vErr.message }
+
+  const { error: pErr } = await svc
+    .from('profiles')
+    .update({ verification_tag: tag })
+    .eq('id', memberId)
+  if (pErr) return { error: pErr.message }
+
+  const { error: bErr } = await svc
+    .from('businesses')
+    .update({ verification_tag: tag })
+    .eq('owner_id', memberId)
+  if (bErr) return { error: bErr.message }
+
+  await logEvent(svc, 'verification_manual', ctx.user!.id, memberId, { tag, via: 'admin_manual' }, tenantId)
+
+  const contact = await getMemberContact(svc, memberId)
+  if (contact.email) {
+    const tpl = verificationApprovedEmail(contact.name, VERIFICATION_TAG_LABEL[tag], siteUrl())
+    sendEmail({ to: contact.email, subject: tpl.subject, html: tpl.html }).catch(err => {
+      console.error('manual verification email failed:', err)
+    })
+  }
+
+  await notifyMember({
+    userId: memberId,
+    type: 'verification_approved',
+    title: `You're verified — ${VERIFICATION_TAG_LABEL[tag]}`,
+    body: 'Your membership has been verified by an admin.',
+    link: '/dashboard',
+  })
+
+  revalidatePath('/admin/verifications')
+  revalidatePath('/admin/members')
+  revalidatePath('/marketplace')
+  return { error: null }
+}
+
+/**
  * Re-trigger the LinkedIn auto-scrape for an existing verification row.
  * Used when the scrape failed at submit time (RapidAPI was down, key
  * was missing, etc.) or when the admin wants a fresh read after the
