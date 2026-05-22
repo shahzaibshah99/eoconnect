@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { formatDistanceToNow, format, isPast, differenceInDays } from 'date-fns'
-import { MapPin, MessageSquare, Clock, CheckCircle2 } from 'lucide-react'
+import { MapPin, MessageSquare, Clock, CheckCircle2, Briefcase, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export interface PostCardItem {
@@ -17,6 +17,7 @@ export interface PostCardItem {
   status: 'open' | 'fulfilled' | 'expired' | 'archived'
   response_count: number
   created_at: string
+  board_type?: 'business' | 'community'
   profiles: {
     full_name: string | null
     avatar_url: string | null
@@ -29,9 +30,10 @@ interface PostCardProps {
   post: PostCardItem
   currentUserId?: string | null
   basePath?: string
+  showTypeBadge?: boolean
 }
 
-export function PostCard({ post, currentUserId: _, basePath = '/bulletin' }: PostCardProps) {
+export function PostCard({ post, currentUserId: _, basePath = '/bulletin', showTypeBadge = false }: PostCardProps) {
   const requiredBy = new Date(post.required_by)
   const daysLeft = differenceInDays(requiredBy, new Date())
   const isExpiringSoon = daysLeft >= 0 && daysLeft <= 2
@@ -63,9 +65,24 @@ export function PostCard({ post, currentUserId: _, basePath = '/bulletin' }: Pos
               </span>
             </div>
 
-            <h2 className="font-semibold group-hover:text-primary transition-colors leading-tight mb-2">
-              {post.title}
-            </h2>
+            <div className="flex items-center gap-2 mb-2">
+              <h2 className="font-semibold group-hover:text-primary transition-colors leading-tight">
+                {post.title}
+              </h2>
+              {showTypeBadge && post.board_type && (
+                <span className={cn(
+                  'inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0',
+                  post.board_type === 'community'
+                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                    : 'bg-primary/10 text-primary'
+                )}>
+                  {post.board_type === 'community'
+                    ? <><Users className="h-2.5 w-2.5" /> Community</>
+                    : <><Briefcase className="h-2.5 w-2.5" /> Business</>
+                  }
+                </span>
+              )}
+            </div>
 
             {post.detail && (
               <p className="text-sm text-muted-foreground line-clamp-2 mb-3">{post.detail}</p>

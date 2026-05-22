@@ -190,8 +190,9 @@ export async function toggleCategoryActive(id: string, active: boolean): Promise
 
 export async function setMemberStatus(
   userId: string,
-  status: 'pending' | 'active' | 'suspended' | 'archived'
-): Promise<{ error: string | null }> {
+  status: 'pending' | 'active' | 'suspended' | 'archived',
+  force = false
+): Promise<{ error: string | null; chapterManagerWarning?: boolean }> {
   const ctx = await requireAdmin()
   if (ctx.error) return { error: ctx.error }
   if (!ctx.role) return { error: 'Not authorized' }
@@ -202,6 +203,20 @@ export async function setMemberStatus(
   const svc = adminDb()
   if (!(await targetInScope(svc, ctx as { role: 'chapter_admin' | 'super_admin'; scopeCountry: string | null; scopeCity: string | null }, 'profiles', userId))) {
     return { error: 'This member is outside your chapter scope' }
+  }
+
+  // Warn before suspending/archiving a chapter manager — they keep their
+  // chapter assignments but lose platform access, which may leave a chapter
+  // without an active manager. Caller passes force=true to proceed.
+  if (!force && (status === 'suspended' || status === 'archived')) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { count } = await (svc as any)
+      .from('chapter_managers')
+      .select('id', { count: 'exact', head: true })
+      .eq('member_id', userId) as { count: number | null }
+    if (count && count > 0) {
+      return { error: null, chapterManagerWarning: true }
+    }
   }
 
   const { data, error } = await svc

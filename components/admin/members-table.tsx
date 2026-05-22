@@ -199,9 +199,17 @@ export function MembersTable({ members, canChangeRole, chapters, assignableTags 
 function MemberRow({ member, canChangeRole, chapters, assignableTags }: { member: Member; canChangeRole: boolean; chapters: Chapter[]; assignableTags: AssignableTag[] }) {
   const [isPending, startTransition] = useTransition()
   const [scopeDialogOpen, setScopeDialogOpen] = useState(false)
+  const [cmWarningOpen, setCmWarningOpen] = useState(false)
+  const [pendingStatus, setPendingStatus] = useState<Status | null>(null)
 
-  const changeStatus = (status: Status) =>
-    startTransition(() => { setMemberStatus(member.id, status) })
+  const changeStatus = (status: Status, force = false) =>
+    startTransition(async () => {
+      const res = await setMemberStatus(member.id, status, force)
+      if (res?.chapterManagerWarning) {
+        setPendingStatus(status)
+        setCmWarningOpen(true)
+      }
+    })
 
   const changeRole = (role: Role) => {
     if (role === 'chapter_admin') {
@@ -327,6 +335,36 @@ function MemberRow({ member, canChangeRole, chapters, assignableTags }: { member
         member={member}
         chapters={chapters}
       />
+      <Dialog open={cmWarningOpen} onOpenChange={setCmWarningOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>This member is a chapter manager</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 py-1 text-sm text-muted-foreground">
+            <p>
+              <span className="font-semibold text-foreground">{member.full_name}</span> is assigned as a chapter manager.
+              {pendingStatus === 'suspended' ? ' Suspending' : ' Archiving'} their account will lock them out of the platform,
+              but will <span className="font-semibold text-foreground">not</span> remove them from chapter management assignments.
+            </p>
+            <p>You may want to reassign the chapter first. Proceed anyway?</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setCmWarningOpen(false); setPendingStatus(null) }}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setCmWarningOpen(false)
+                if (pendingStatus) changeStatus(pendingStatus, true)
+                setPendingStatus(null)
+              }}
+            >
+              {pendingStatus === 'suspended' ? 'Suspend anyway' : 'Archive anyway'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

@@ -15,7 +15,7 @@ interface Category {
   active: boolean
 }
 
-export function CategoriesManager({ categories }: { categories: Category[] }) {
+export function CategoriesManager({ categories, bizCountByCategory }: { categories: Category[]; bizCountByCategory: Record<string, number> }) {
   return (
     <div className="space-y-6">
       <NewCategoryForm nextSortOrder={(categories.at(-1)?.sort_order ?? 0) + 1} />
@@ -27,13 +27,16 @@ export function CategoriesManager({ categories }: { categories: Category[] }) {
               <th className="text-left p-3 font-medium">Name</th>
               <th className="text-left p-3 font-medium">Slug</th>
               <th className="text-left p-3 font-medium">Order</th>
+              <th className="text-left p-3 font-medium">Businesses</th>
               <th className="text-left p-3 font-medium">Active</th>
             </tr>
           </thead>
           <tbody>
-            {categories.map(c => <CategoryRow key={c.id} category={c} />)}
+            {categories.map(c => (
+              <CategoryRow key={c.id} category={c} bizCount={bizCountByCategory[c.id] ?? 0} />
+            ))}
             {categories.length === 0 && (
-              <tr><td colSpan={5} className="text-center py-10 text-muted-foreground text-sm">No categories yet.</td></tr>
+              <tr><td colSpan={6} className="text-center py-10 text-muted-foreground text-sm">No categories yet.</td></tr>
             )}
           </tbody>
         </table>
@@ -80,7 +83,7 @@ function NewCategoryForm({ nextSortOrder }: { nextSortOrder: number }) {
   )
 }
 
-function CategoryRow({ category }: { category: Category }) {
+function CategoryRow({ category, bizCount }: { category: Category; bizCount: number }) {
   const [isPending, startTransition] = useTransition()
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(category.name)
@@ -122,6 +125,12 @@ function CategoryRow({ category }: { category: Category }) {
         ) : (
           category.sort_order
         )}
+      </td>
+      <td className="p-3 text-muted-foreground text-xs">
+        {bizCount > 0
+          ? <span className="font-medium text-foreground">{bizCount}</span>
+          : <span className="text-muted-foreground/50">0</span>
+        }
       </td>
       <td className="p-3">
         <div className="flex items-center gap-3">

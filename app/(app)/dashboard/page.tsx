@@ -27,6 +27,7 @@ export type NeedsPost = {
   response_count: number
   created_at: string
   board_type: 'business' | 'community'
+  ai_tagline: string | null
 }
 
 interface DashboardPageProps {
@@ -143,7 +144,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   // Falls back to showing all open posts when the business has no country set.
   const needsQuery = db
     .from('bulletin_posts')
-    .select('id, title, category, tags, geography_country, geography_city, required_by, status, response_count, created_at, board_type')
+    .select('id, title, category, tags, geography_country, geography_city, required_by, status, response_count, created_at, board_type, ai_tagline')
     .eq('status', 'open')
     .eq('tenant_id', 'eo')
     .order('created_at', { ascending: false })
@@ -153,8 +154,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     ? await needsQuery.eq('geography_country', business.country)
     : await needsQuery
 
-  const businessNeeds = ((needsPosts ?? []) as NeedsPost[]).filter(p => p.board_type === 'business').slice(0, 5)
-  const communityAsks = ((needsPosts ?? []) as NeedsPost[]).filter(p => p.board_type === 'community').slice(0, 5)
+  const allNeedsPosts = (needsPosts ?? []) as NeedsPost[]
 
   // Endorsements received on ALL the member's businesses
   const allBusinessIds = allBusinesses.map(b => b.id)
@@ -376,8 +376,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
       {/* Needs & Leads feed — moved above My Posts (defect #6 fix) */}
       <NeedsLeadsFeed
-        businessNeeds={businessNeeds}
-        communityAsks={communityAsks}
+        posts={allNeedsPosts}
         country={business.country ?? null}
       />
 

@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { currentTenant } from '@/lib/tenant'
 import { requireVerified } from '@/lib/verification-gate'
 import { reviewBulletinPost } from '@/lib/ai/review-bulletin-post'
+import { generateCommunityTagline } from '@/lib/ai/generate-community-tagline'
 import { extractReferralsFromReply } from '@/lib/ai/extract-referrals'
 import { searchReferrals, type ReferralSearchResult } from '@/lib/ai/referral-search'
 import { getEmbedding } from '@/lib/ai/embeddings'
@@ -162,6 +163,19 @@ export async function submitBulletinPost(input: unknown): Promise<{
   let matchedMembers: Array<{ id: string; name: string }> = []
 
   if (boardType === 'community') {
+    // Generate AI tagline for community asks in the background — best-effort.
+    void generateCommunityTagline({
+      title: parsed.data.title,
+      detail: parsed.data.detail ?? '',
+      category: parsed.data.category,
+    }).then(tagline => {
+      if (tagline) {
+        db.from('bulletin_posts').update({ ai_tagline: tagline }).eq('id', post.id)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .then(({ error }: { error: any }) => { if (error) console.error('[tagline] save failed:', error.message) })
+      }
+    }).catch(err => console.error('[tagline] generation failed:', err))
+
     matchedMembers = await notifyMembersGeo({
       postId: post.id,
       country: parsed.data.geography_country,

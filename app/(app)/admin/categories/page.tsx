@@ -24,6 +24,18 @@ export default async function AdminCategoriesPage() {
     }> | null
   }
 
+  const { data: bizRows } = await db
+    .from('businesses')
+    .select('category_ids')
+    .eq('status', 'published') as { data: Array<{ category_ids: string[] | null }> | null }
+
+  const bizCountByCategory: Record<string, number> = {}
+  for (const biz of bizRows ?? []) {
+    for (const catId of biz.category_ids ?? []) {
+      bizCountByCategory[catId] = (bizCountByCategory[catId] ?? 0) + 1
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div>
@@ -32,7 +44,7 @@ export default async function AdminCategoriesPage() {
           Add new categories or toggle existing ones. Updates are reflected on the marketplace immediately.
         </p>
       </div>
-      <CategoriesManager categories={categories ?? []} />
+      <CategoriesManager categories={categories ?? []} bizCountByCategory={bizCountByCategory} />
     </div>
   )
 }
