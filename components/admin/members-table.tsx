@@ -10,7 +10,7 @@ import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { ChapterPicker, type Chapter } from '@/components/forms/chapter-picker'
 import { describeChapterScope } from '@/lib/chapter-scope'
-import { ChevronLeft, ChevronRight, ShieldCheck, Ban, Archive, ArchiveRestore, UserCheck, CheckCircle } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ShieldCheck, Ban, Archive, ArchiveRestore, UserCheck, CheckCircle, Tag } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { VERIFICATION_TAG_LABEL, type AssignableTag } from '@/lib/verification-tags'
 
@@ -282,8 +282,8 @@ function MemberRow({ member, canChangeRole, chapters, assignableTags }: { member
         </td>
         <td className="p-3">
           <div className="flex items-center justify-end gap-0.5">
-            {!isArchived && canChangeRole && isUnverified && (
-              <VerifyMemberDialog member={member} assignableTags={assignableTags} />
+            {!isArchived && canChangeRole && (
+              <VerifyMemberDialog member={member} assignableTags={assignableTags} isVerified={!isUnverified} />
             )}
             {isArchived ? (
               <button
@@ -369,9 +369,12 @@ function MemberRow({ member, canChangeRole, chapters, assignableTags }: { member
   )
 }
 
-function VerifyMemberDialog({ member, assignableTags }: { member: Member; assignableTags: AssignableTag[] }) {
+function VerifyMemberDialog({ member, assignableTags, isVerified }: { member: Member; assignableTags: AssignableTag[]; isVerified: boolean }) {
   const [open, setOpen] = useState(false)
-  const [tag, setTag] = useState<AssignableTag>(assignableTags[0])
+  const currentTag = assignableTags.includes(member.verification_tag as AssignableTag)
+    ? (member.verification_tag as AssignableTag)
+    : assignableTags[0]
+  const [tag, setTag] = useState<AssignableTag>(currentTag)
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
@@ -386,22 +389,35 @@ function VerifyMemberDialog({ member, assignableTags }: { member: Member; assign
 
   if (assignableTags.length === 0) return null
 
+  const title = isVerified ? `Change tag for ${member.full_name}` : `Manually verify ${member.full_name}`
+  const buttonLabel = isPending ? (isVerified ? 'Saving…' : 'Verifying…') : (isVerified ? 'Update tag' : 'Verify member')
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<button title="Verify member" className="h-7 w-7 rounded-md flex items-center justify-center text-green-600 dark:text-green-400 hover:bg-green-500/10 transition-colors" />}>
-        <ShieldCheck className="h-3.5 w-3.5" />
+      <DialogTrigger render={<button
+        title={isVerified ? 'Change tag' : 'Verify member'}
+        className={cn(
+          'h-7 w-7 rounded-md flex items-center justify-center transition-colors',
+          isVerified
+            ? 'text-blue-600 dark:text-blue-400 hover:bg-blue-500/10'
+            : 'text-green-600 dark:text-green-400 hover:bg-green-500/10'
+        )}
+      />}>
+        {isVerified ? <Tag className="h-3.5 w-3.5" /> : <ShieldCheck className="h-3.5 w-3.5" />}
       </DialogTrigger>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Manually verify {member.full_name}</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3 py-2">
           <p className="text-sm text-muted-foreground">
-            Bypasses the normal verification form. Use for known members you can vouch for directly.
+            {isVerified
+              ? 'Change the verification tag assigned to this member.'
+              : 'Bypasses the normal verification form. Use for known members you can vouch for directly.'}
           </p>
           <div className="space-y-2">
             <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground block">
-              Assign tag
+              {isVerified ? 'Change to' : 'Assign tag'}
             </label>
             <Select value={tag} onValueChange={(v: string | null) => v && setTag(v as AssignableTag)}>
               <SelectTrigger className="w-full h-10"><SelectValue /></SelectTrigger>
@@ -416,9 +432,7 @@ function VerifyMemberDialog({ member, assignableTags }: { member: Member; assign
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)} disabled={isPending}>Cancel</Button>
-          <Button onClick={save} disabled={isPending}>
-            {isPending ? 'Verifying…' : 'Verify member'}
-          </Button>
+          <Button onClick={save} disabled={isPending}>{buttonLabel}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
