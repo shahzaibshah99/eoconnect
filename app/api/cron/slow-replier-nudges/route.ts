@@ -51,6 +51,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
   }
+  if (process.env.DISABLE_EMAIL_REMINDERS !== 'false') {
+    return NextResponse.json({ skipped: true, reason: 'DISABLE_EMAIL_REMINDERS' })
+  }
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return NextResponse.json({ ok: false, message: 'SUPABASE_SERVICE_ROLE_KEY not set' }, { status: 503 })
   }
