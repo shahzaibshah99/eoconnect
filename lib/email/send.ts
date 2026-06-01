@@ -52,7 +52,6 @@ export async function sendEmail(opts: {
   const t = getTransport()
   if (!t) {
     console.warn(`[email] skipped — SMTP_HOST not configured (would send "${opts.subject}" to ${opts.to})`)
-    void logEmailEvent({ to: opts.to, subject: opts.subject, status: 'skipped', error: 'SMTP not configured', html: opts.html })
     return { ok: false, error: 'SMTP not configured' }
   }
   try {
