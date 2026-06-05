@@ -14,7 +14,6 @@ import { getEmbedding } from '@/lib/ai/embeddings'
 import { sendEmail } from '@/lib/email/send'
 import { siteUrl } from '@/lib/site-url'
 import { VERIFICATION_TIER } from '@/lib/bulletin-constants'
-import { getEmbedding } from '@/lib/ai/embeddings'
 
 function adminDb() {
   return createServiceClient(
