@@ -37,6 +37,35 @@ export interface Profile {
   notifications_seen_at: string | null
 }
 
+export type MarketTagLevel = 1 | 2 | 3 | 4 | 5
+export type MarketTagAssignedBy = 'ai' | 'admin' | 'user'
+
+export interface MarketTag {
+  id: string
+  tag_id: string
+  sector: string
+  industry: string
+  niche: string
+  sub_niche: string | null
+  specialism: string | null
+  tag_type: string | null
+  level: MarketTagLevel
+  full_path: string
+  match_weight: number
+  notes: string | null
+  embedding_updated_at: string | null
+  created_at: string
+}
+
+export interface BusinessMarketTag {
+  id: string
+  business_id: string
+  market_tag_id: string
+  assigned_at: string
+  assigned_by: MarketTagAssignedBy
+  confidence: number | null
+}
+
 export interface Category {
   id: string
   name: string

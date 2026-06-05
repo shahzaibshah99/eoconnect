@@ -231,10 +231,21 @@ async function SearchResults({ searchParams }: SearchPageProps) {
     // Run parser, embedding, AND tag candidates in parallel.
     // Tag candidates = all published businesses (respecting active filters)
     // so we can score them by keyword overlap client-side.
-    const [parsed, queryEmbedding, tagCandidatesRes] = await Promise.all([
+    // Embedding first so we can use it for both vector search and taxonomy tag lookup
+    const queryEmbedding = await getEmbedding(queryText)
+
+    const [parsed, tagCandidatesRes, taxonomyTagsRes] = await Promise.all([
       categories ? parseSearchQuery(queryText, categories) : Promise.resolve(null),
-      getEmbedding(queryText),
       buildBase().select('id, tags').limit(200),
+      // Taxonomy: map query to the closest structured taxonomy tags
+      queryEmbedding
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ? (db as any).rpc('search_market_tags_by_embedding', {
+            query_embedding: queryEmbedding,
+            match_count: 15,
+            min_similarity: 0.35,
+          })
+        : Promise.resolve({ data: null }),
     ])
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tagCandidates = (tagCandidatesRes as any).data as Array<{ id: string; tags: string[] }> | null
@@ -340,10 +351,50 @@ async function SearchResults({ searchParams }: SearchPageProps) {
       }
     }
 
+    // ── Taxonomy merge: structured tag scoring ────────────────────
+    // Businesses whose taxonomy tags match the query's tag candidates
+    // are injected / re-sorted before the freeform tag merge below.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const taxonomyTagRows = (taxonomyTagsRes as any)?.data as
+      Array<{ id: string; full_path: string; match_weight: number }> | null
+    const taxonomyTagIds = (taxonomyTagRows ?? []).map(t => t.id)
+    tierCounts.taxonomy_tags_found = taxonomyTagIds.length
+
+    const taxonomyBusinessScores = new Map<string, number>() // business_id → score
+    if (taxonomyTagIds.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: taxMatches } = await (db as any).rpc('match_businesses_by_market_tags', {
+        p_tag_ids: taxonomyTagIds,
+        match_count: 30,
+      }) as { data: Array<{ business_id: string; score: number }> | null }
+      for (const m of taxMatches ?? []) {
+        taxonomyBusinessScores.set(m.business_id, Number(m.score))
+      }
+    }
+    tierCounts.taxonomy_biz_scored = taxonomyBusinessScores.size
+
+    if (taxonomyBusinessScores.size > 0) {
+      // Re-sort existing results: higher taxonomy score first
+      results = [...results].sort((a, b) =>
+        (taxonomyBusinessScores.get(b.id) ?? 0) - (taxonomyBusinessScores.get(a.id) ?? 0)
+      )
+      // Inject taxonomy-only businesses not already in results
+      const existingIds = new Set(results.map(b => b.id))
+      const taxOnlyIds = [...taxonomyBusinessScores.keys()].filter(id => !existingIds.has(id))
+      if (taxOnlyIds.length > 0) {
+        const { data: taxOnlyRows } = await buildBase()
+          .in('id', taxOnlyIds) as { data: Business[] | null }
+        const sortedTaxOnly = (taxOnlyRows ?? []).sort((a, b) =>
+          (taxonomyBusinessScores.get(b.id) ?? 0) - (taxonomyBusinessScores.get(a.id) ?? 0)
+        )
+        results = [...results, ...sortedTaxOnly]
+        tierCounts.taxonomy_biz_injected = taxOnlyIds.length
+      }
+    }
+
     // ── Tag merge: add tag-matched businesses missing from tier results ──
-    // Businesses with a tag keyword match that weren't caught by vector/FTS
-    // get added here. Results are then re-ordered: vector+tag > tag-only >
-    // vector-only so explicit tag signals always surface first.
+    // Businesses with a freeform tag keyword match that weren't caught by
+    // vector/FTS/taxonomy get added here.
     const vectorIdSet = new Set(results.map(b => b.id))
     const tagOnlyIds = [...tagMatchIds].filter(id => !vectorIdSet.has(id))
     if (tagOnlyIds.length > 0) {

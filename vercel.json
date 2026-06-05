@@ -7,6 +7,14 @@
   ],
   "_crons_paused": [
     {
+      "path": "/api/cron/backfill-tag-embeddings",
+      "schedule": "37 3 * * *"
+    },
+    {
+      "path": "/api/cron/backfill-market-tags",
+      "schedule": "47 3 * * *"
+    },
+    {
       "path": "/api/cron/verification-reminders",
       "schedule": "13 9 * * *"
     },
