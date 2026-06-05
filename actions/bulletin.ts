@@ -14,6 +14,7 @@ import { getEmbedding } from '@/lib/ai/embeddings'
 import { sendEmail } from '@/lib/email/send'
 import { siteUrl } from '@/lib/site-url'
 import { VERIFICATION_TIER } from '@/lib/bulletin-constants'
+import { getEmbedding } from '@/lib/ai/embeddings'
 
 function adminDb() {
   return createServiceClient(
@@ -259,6 +260,19 @@ function scoreTagMatch(bizTags: string[], needKeywords: Set<string>): number {
   return score
 }
 
+// Weighted taxonomy score: sum match_weights of taxonomy tags shared between
+// the post's candidate tags and this business's assigned taxonomy tags.
+function scoreTaxonomyMatch(
+  bizTagIds: Set<string>,
+  postTagWeights: Map<string, number>
+): number {
+  let total = 0
+  for (const [tagId, weight] of postTagWeights) {
+    if (bizTagIds.has(tagId)) total += weight
+  }
+  return total
+}
+
 async function matchAndNotify(input: {
   postId: string
   tags: string[]
@@ -293,13 +307,60 @@ async function matchAndNotify(input: {
 
   if (!candidates || candidates.length === 0) return []
 
-  // Build keyword set from need tags + description for richer matching.
+  // ── Taxonomy scoring (primary signal) ───────────────────────
+  // Map the post to taxonomy tags via embedding similarity, then fetch
+  // which taxonomy tags each candidate business holds.
+  const postTagWeights = new Map<string, number>() // tag_id → match_weight
+
+  const postText = [input.postTitle, ...input.tags, input.detail ?? '']
+    .filter(Boolean).join(' ')
+  const postEmbedding = await getEmbedding(postText)
+
+  if (postEmbedding) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: tagMatches } = await (svc as any).rpc('search_market_tags_by_embedding', {
+      query_embedding: postEmbedding,
+      match_count: 15,
+      min_similarity: 0.35,
+    }) as { data: Array<{ id: string; full_path: string; match_weight: number }> | null }
+
+    for (const t of tagMatches ?? []) {
+      postTagWeights.set(t.id, t.match_weight)
+    }
+  }
+
+  // Build per-business set of taxonomy tag IDs in a single query
+  const bizTagMap = new Map<string, Set<string>>() // business_id → Set<tag_id>
+
+  if (postTagWeights.size > 0) {
+    const candidateIds = candidates.map(b => b.id)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: bizTags } = await (svc as any)
+      .from('business_market_tags')
+      .select('business_id, market_tag_id')
+      .in('business_id', candidateIds) as {
+        data: Array<{ business_id: string; market_tag_id: string }> | null
+      }
+
+    for (const row of bizTags ?? []) {
+      if (!bizTagMap.has(row.business_id)) bizTagMap.set(row.business_id, new Set())
+      bizTagMap.get(row.business_id)!.add(row.market_tag_id)
+    }
+  }
+
+  // ── Freeform keyword scoring (fallback / tiebreaker) ─────────
   const needKeywords = extractKeywords([...input.tags, input.detail ?? ''])
 
-  // Score each business by word-level overlap with its tags.
-  // Sort: score DESC → verification tier → recency. Keep top 6.
+  // ── Combined scoring ─────────────────────────────────────────
+  // taxonomy weighted 2× over freeform keywords.
+  // When taxonomy scores are all 0 (system not yet populated),
+  // combined === keywordScore → identical to previous behaviour.
   const scored = candidates
-    .map(biz => ({ biz, score: scoreTagMatch(biz.tags ?? [], needKeywords) }))
+    .map(biz => {
+      const taxonomyScore = scoreTaxonomyMatch(bizTagMap.get(biz.id) ?? new Set(), postTagWeights)
+      const keywordScore  = scoreTagMatch(biz.tags ?? [], needKeywords)
+      return { biz, score: taxonomyScore * 2 + keywordScore }
+    })
     .filter(({ score }) => score > 0)
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score

@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { uploadFile } from '@/lib/storage'
 import { refreshBusinessEmbedding } from '@/lib/ai/refresh-business-embedding'
+import { assignMarketTagsForBusiness } from '@/lib/ai/assign-market-tags-for-business'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
@@ -239,9 +240,12 @@ export async function createBusiness(formData: FormData): Promise<BusinessAction
       .eq('id', user.id)
       .is('onboarded_at', null)
 
-    // Compute search embedding (fire-and-forget — don't block redirect)
+    // Compute search embedding + taxonomy tags (fire-and-forget — don't block redirect)
     if (data?.id) {
       void refreshBusinessEmbedding(db, data.id)
+      if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+        void assignMarketTagsForBusiness(data.id)
+      }
     }
 
     revalidatePath('/marketplace')
@@ -400,8 +404,11 @@ export async function updateBusiness(id: string, formData: FormData): Promise<Bu
       return { error: error.message }
     }
 
-    // Refresh search embedding (fire-and-forget)
+    // Refresh search embedding + taxonomy tags (fire-and-forget)
     void refreshBusinessEmbedding(db, id)
+    if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      void assignMarketTagsForBusiness(id)
+    }
 
     revalidatePath('/marketplace')
     revalidatePath(`/marketplace/${id}`)
