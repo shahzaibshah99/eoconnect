@@ -1,9 +1,11 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { cookies } from 'next/headers'
 import { z } from 'zod'
 import { sendEmail, welcomeEmail } from '@/lib/email/send'
 import { siteUrl } from '@/lib/site-url'
+import { decodePendingLink, completeWhatsAppLink } from '@/services/whatsapp/complete-link'
 
 const SignUpSchema = z.object({
   fullName: z.string().min(2, 'Full name required'),
@@ -99,12 +101,26 @@ export async function signIn(formData: FormData): Promise<AuthResult> {
   }
 
   const supabase = await createClient()
-  const { error } = await supabase.auth.signInWithPassword({
+  const { error, data } = await supabase.auth.signInWithPassword({
     email: parsed.data.email,
     password: parsed.data.password,
   })
 
   if (error) return { error: error.message }
+
+  // Password login does NOT route through /auth/callback, so complete any
+  // pending WhatsApp account link here (set by /api/auth/whatsapp-link).
+  const cookieStore = await cookies()
+  const link = decodePendingLink(cookieStore.get('wa_pending_link')?.value)
+  if (link && data?.user) {
+    try {
+      await completeWhatsAppLink(data.user.id, link)
+    } catch (linkErr) {
+      console.error('[auth] wa_pending_link processing failed:', linkErr)
+    }
+    cookieStore.set('wa_pending_link', '', { maxAge: 0, path: '/' })
+  }
+
   return { error: null }
 }
 
