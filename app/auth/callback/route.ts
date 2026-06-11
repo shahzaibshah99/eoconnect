@@ -1,7 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
-import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { type NextRequest, NextResponse } from 'next/server'
-import { sendWhatsAppMessage } from '@/services/whatsapp/waha-client'
+import { decodePendingLink, completeWhatsAppLink } from '@/services/whatsapp/complete-link'
 
 /**
  * Whitelist of paths the OAuth/recovery callback is allowed to land users on
@@ -77,62 +76,13 @@ export async function GET(request: NextRequest) {
     const { error, data: sessionData } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
       // Complete WhatsApp account linking if a pending link cookie is present
-      const pendingLink = request.cookies.get('wa_pending_link')?.value
-      if (pendingLink && sessionData?.user) {
+      const link = decodePendingLink(request.cookies.get('wa_pending_link')?.value)
+      if (link && sessionData?.user) {
         try {
-          const { jid, tokenId, shadowUserId } = JSON.parse(
-            Buffer.from(pendingLink, 'base64url').toString('utf-8')
-          ) as { jid: string | null; tokenId: string; shadowUserId: string }
-
-          if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
-            const svc = createServiceClient(
-              process.env.NEXT_PUBLIC_SUPABASE_URL!,
-              process.env.SUPABASE_SERVICE_ROLE_KEY,
-              { auth: { persistSession: false } }
-            )
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const svcAny = svc as any
-
-            // Link the shadow user to the real profile
-            if (jid) {
-              await svcAny
-                .from('shadow_users')
-                .update({ linked_user_id: sessionData.user.id, linked_at: new Date().toISOString() })
-                .eq('whatsapp_jid', jid)
-            } else {
-              await svcAny
-                .from('shadow_users')
-                .update({ linked_user_id: sessionData.user.id, linked_at: new Date().toISOString() })
-                .eq('id', shadowUserId)
-            }
-
-            // Mark the token consumed
-            await svcAny
-              .from('whatsapp_link_tokens')
-              .update({ consumed_at: new Date().toISOString() })
-              .eq('id', tokenId)
-
-            // Transition DM state to linked
-            if (jid) {
-              await svcAny
-                .from('whatsapp_dm_state')
-                .upsert(
-                  { jid, state: 'linked', updated_at: new Date().toISOString() },
-                  { onConflict: 'jid' }
-                )
-
-              // Fire-and-forget confirmation DM
-              sendWhatsAppMessage(
-                jid,
-                `Your WhatsApp is now linked to your Member Market account! Future posts from this number will appear under your name.`
-              ).catch(() => {})
-            }
-          }
+          await completeWhatsAppLink(sessionData.user.id, link)
         } catch (linkErr) {
           console.error('[auth/callback] wa_pending_link processing failed:', linkErr)
         }
-
-        // Clear the cookie
         response.cookies.set('wa_pending_link', '', { maxAge: 0, path: '/' })
       }
 

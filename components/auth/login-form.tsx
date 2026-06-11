@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { signIn } from '@/actions/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,6 +16,14 @@ export function LoginForm() {
   const [isPending, startTransition] = useTransition()
   const [showPwd, setShowPwd] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
+
+  // Honor ?next= (e.g. the WhatsApp link flow sends ?next=/dashboard?toast=...).
+  // Only allow internal absolute paths to avoid open-redirects.
+  const rawNext = searchParams.get('next')
+  const next = rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//')
+    ? rawNext
+    : '/marketplace'
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -24,7 +32,7 @@ export function LoginForm() {
     startTransition(async () => {
       const result = await signIn(formData)
       if (result?.error) setError(result.error)
-      else router.push('/marketplace')
+      else router.push(next)
     })
   }
 
