@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { createClient as createSsrClient } from '@/lib/supabase/server'
+import { completeWhatsAppLink } from '@/services/whatsapp/complete-link'
 import { siteUrl } from '@/lib/site-url'
 
 function adminDb() {
@@ -53,37 +55,42 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('/login?error=token_expired', base))
   }
 
-  // Encode the pending link intent into a cookie so the auth callback can
-  // complete the binding after the user authenticates.
-  // The cookie must be set ON THE REDIRECT RESPONSE so the browser carries
-  // it through the login → OAuth callback flow.
-  const pendingLinkValue = Buffer.from(
-    JSON.stringify({ jid: null, tokenId: linkToken.id, shadowUserId: linkToken.shadow_user_id })
-  ).toString('base64url')
-
-  // We need the shadow user's JID to set up the cookie properly
+  // Look up the shadow user's JID (needed both to link now and to carry in the cookie).
   const { data: shadowUser } = await dbAny
     .from('shadow_users')
     .select('whatsapp_jid')
     .eq('id', linkToken.shadow_user_id)
     .maybeSingle() as { data: { whatsapp_jid: string } | null }
 
-  const cookieValue = Buffer.from(
-    JSON.stringify({
-      jid: shadowUser?.whatsapp_jid ?? null,
-      tokenId: linkToken.id,
-      shadowUserId: linkToken.shadow_user_id,
-    })
-  ).toString('base64url')
+  const link = {
+    jid: shadowUser?.whatsapp_jid ?? null,
+    tokenId: linkToken.id,
+    shadowUserId: linkToken.shadow_user_id,
+  }
 
-  // Redirect to login with next=/dashboard?toast=whatsapp-linked
+  // If the user is ALREADY logged in, complete the link immediately and skip
+  // the login round-trip. (Otherwise the middleware bounces a logged-in user
+  // off /login to /marketplace and the link cookie is never consumed.)
+  try {
+    const ssr = await createSsrClient()
+    const { data: { user } } = await ssr.auth.getUser()
+    if (user) {
+      await completeWhatsAppLink(user.id, link)
+      return NextResponse.redirect(new URL('/dashboard?toast=whatsapp-linked', base))
+    }
+  } catch (err) {
+    console.error('[whatsapp-link] session check failed, falling back to login flow:', err)
+  }
+
+  // Not logged in: stash the link intent in a cookie and send them to login.
+  // The cookie must be set ON THE REDIRECT RESPONSE so the browser carries it
+  // through the login → completion flow (signIn() / /auth/callback read it).
+  const cookieValue = Buffer.from(JSON.stringify(link)).toString('base64url')
+
   const loginUrl = new URL('/login', base)
   loginUrl.searchParams.set('next', '/dashboard?toast=whatsapp-linked')
 
   const response = NextResponse.redirect(loginUrl)
-
-  // Set cookie BEFORE returning the redirect — browser stores it and
-  // carries it through the login → /auth/callback flow
   response.cookies.set('wa_pending_link', cookieValue, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
