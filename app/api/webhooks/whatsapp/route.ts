@@ -230,21 +230,36 @@ async function handleGroupMessage(
   }
 
   // DM the individual poster (senderJid is the person's @c.us/@lid JID, NOT the
-  // group) to confirm their need was posted and offer to link their account.
+  // group) to confirm their need was posted.
   if (result.postId && senderJid) {
-    const dmText = result.matchedCount > 0
-      ? `Hi ${senderName} 👋 I picked up your message in the group and shared it with ${result.matchedCount} relevant ${result.matchedCount === 1 ? 'member' : 'members'} on Member Market. Reply here with your email and I'll link this to your account so you get their responses.`
-      : `Hi ${senderName} 👋 I picked up your message in the group and posted it to Member Market. I didn't find an immediate match, but it's live for members to respond to. Reply here with your email and I'll link this to your account.`
+    const alreadyLinked = !!shadowUser.linked_user_id
+    const matchLine = result.matchedCount > 0
+      ? `I shared it with ${result.matchedCount} relevant ${result.matchedCount === 1 ? 'member' : 'members'} on Member Market.`
+      : `I didn't find an immediate match, but it's live for members to respond to.`
 
-    const dmResult = await sendWhatsAppMessage(senderJid, dmText)
-    trace.posterDm = dmResult.ok ? 'sent' : `ERR: ${dmResult.error}`
-
-    // Seed the DM flow state so a follow-up email reply links their account.
-    await dbAny
-      .from('whatsapp_dm_state')
-      .upsert(
-        { jid: senderJid, state: 'awaiting_reply', last_post_id: result.postId, updated_at: new Date().toISOString() },
-        { onConflict: 'jid' }
+    if (alreadyLinked) {
+      // Already linked — just confirm the post, don't ask to link again and
+      // DON'T reset DM state (leave it 'linked').
+      const dmResult = await sendWhatsAppMessage(
+        senderJid,
+        `Hi ${senderName} 👋 I picked up your message in the group and posted it under your account. ${matchLine}`
       )
+      trace.posterDm = dmResult.ok ? 'sent_linked' : `ERR: ${dmResult.error}`
+    } else {
+      // Not linked — confirm the post and invite them to link their account.
+      const dmResult = await sendWhatsAppMessage(
+        senderJid,
+        `Hi ${senderName} 👋 I picked up your message in the group and posted it to Member Market. ${matchLine} Reply here with your email and I'll link this to your account.`
+      )
+      trace.posterDm = dmResult.ok ? 'sent' : `ERR: ${dmResult.error}`
+
+      // Seed the DM flow state so a follow-up email reply links their account.
+      await dbAny
+        .from('whatsapp_dm_state')
+        .upsert(
+          { jid: senderJid, state: 'awaiting_reply', last_post_id: result.postId, updated_at: new Date().toISOString() },
+          { onConflict: 'jid' }
+        )
+    }
   }
 }
